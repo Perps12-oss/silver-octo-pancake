@@ -309,11 +309,11 @@ class LiveScanController(QObject):
         self._logger.info("Scan completed")
 
         self._snapshot.complete_scan()
-          # --- FORCE FINAL PROGRESS (prevents UI stuck in discovery) ---
-          try:
-              self._bus.publish_scan_progress(1.0, phase="complete", is_pulsing=False)
-          except Exception:
-              pass
+        # --- FORCE FINAL PROGRESS (prevents UI stuck in discovery) ---
+        try:
+            self._bus.publish_scan_progress(1.0, phase="complete", is_pulsing=False)
+        except Exception:
+            pass
 
         self._pending_snapshot_updates.update({
             "duplicates_found": int(result.get("duplicate_count", 0) or 0),
