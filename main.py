@@ -1,10 +1,21 @@
 # path: main.py
+"""
+CEREBRO — Windows-only duplicate finder (Gemini 2 style).
+Entry point: platform guard, ThemeEngine applied via MainWindow.
+"""
 from __future__ import annotations
 
 import sys
 import os
 import traceback
 from pathlib import Path
+
+# ============================================================================
+# WINDOWS-ONLY PLATFORM GUARD
+# ============================================================================
+if sys.platform != "win32":
+    print("CEREBRO is Windows-only. This application does not run on macOS or Linux.")
+    sys.exit(1)
 
 # ============================================================================
 # FORCE DEBUG MODE

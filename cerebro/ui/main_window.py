@@ -24,7 +24,7 @@ from pathlib import Path
 from PySide6.QtCore import QTimer, Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget,
-    QMessageBox, QFrame, QLabel
+    QMessageBox, QFrame, QLabel, QPushButton, QComboBox
 )
 
 from cerebro.services.logger import log_info, log_error, log_debug
@@ -222,6 +222,40 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
+        # Global top toolbar (Gemini-style)
+        self._toolbar = QFrame()
+        self._toolbar.setObjectName("GlobalToolbar")
+        self._toolbar.setFixedHeight(48)
+        tb_layout = QHBoxLayout(self._toolbar)
+        tb_layout.setContentsMargins(12, 6, 12, 6)
+        tb_layout.setSpacing(12)
+        self._scanner_mode_combo = QComboBox()
+        self._scanner_mode_combo.setToolTip("Scanner mode: Turbo (12x), Ultra (60x), or Quantum (180x+)")
+        self._scanner_mode_combo.addItems([
+            "Turbo (12x)",
+            "Ultra (60x)",
+            "Quantum (180x+)",
+        ])
+        self._scanner_mode_combo.currentIndexChanged.connect(self._on_toolbar_scanner_mode_changed)
+        tb_layout.addWidget(QLabel("Scanner:"))
+        tb_layout.addWidget(self._scanner_mode_combo)
+        tb_layout.addSpacing(16)
+        new_scan_btn = QPushButton("New Scan")
+        new_scan_btn.setToolTip("Start a new duplicate scan")
+        new_scan_btn.clicked.connect(lambda: self.navigate_to("scan"))
+        tb_layout.addWidget(new_scan_btn)
+        for label, station in [("History", "history"), ("Audit", "audit"), ("Hub", "hub"), ("Settings", "settings")]:
+            btn = QPushButton(label)
+            btn.setToolTip(f"Open {label} page")
+            btn.clicked.connect(lambda checked, s=station: self.navigate_to(s))
+            tb_layout.addWidget(btn)
+        self._theme_toggle_btn = QPushButton("Theme: Light")
+        self._theme_toggle_btn.setToolTip("Toggle between Gemini dark and light")
+        self._theme_toggle_btn.clicked.connect(self._on_toolbar_theme_toggle)
+        tb_layout.addWidget(self._theme_toggle_btn)
+        tb_layout.addStretch(1)
+        outer.addWidget(self._toolbar)
+
         # Background scan banner (hidden by default)
         self._scan_banner = QFrame()
         self._scan_banner.setObjectName("ScanBanner")
@@ -251,8 +285,16 @@ class MainWindow(QMainWindow):
         """Apply theme to root widgets."""
         colors = current_colors()
         bg = colors.get('bg', '#0f1115')
+        panel = colors.get('panel', '#151922')
+        line = colors.get('line', '#262c3a')
+        text = colors.get('text', '#e7ecf2')
+        accent = colors.get('accent', '#00C4B4')
         banner_bg = colors.get('warning_bg', 'rgba(234,179,8,0.12)')
         banner_text = colors.get('warning_text', '#facc15')
+        if self._theme.current_theme_key == "gemini_light":
+            self._theme_toggle_btn.setText("Theme: Dark")
+        else:
+            self._theme_toggle_btn.setText("Theme: Light")
 
         self.setStyleSheet(f"""
             QMainWindow {{
@@ -263,6 +305,22 @@ class MainWindow(QMainWindow):
             }}
             QWidget#MainWindow {{
                 background-color: {bg};
+            }}
+            QFrame#GlobalToolbar {{
+                background-color: {panel};
+                border-bottom: 1px solid {line};
+            }}
+            QFrame#GlobalToolbar QLabel {{
+                color: {text};
+                font-family: "Segoe UI", sans-serif;
+            }}
+            QFrame#GlobalToolbar QPushButton {{
+                border-radius: 8px;
+                padding: 6px 12px;
+            }}
+            QFrame#GlobalToolbar QPushButton:hover {{
+                background-color: {accent};
+                color: #0f1115;
             }}
             QFrame#ScanBanner {{
                 background-color: {banner_bg};
@@ -341,6 +399,24 @@ class MainWindow(QMainWindow):
                     color: {colors.get('text', '#e7ecf2')};
                 }}
             """)
+
+    def _on_toolbar_scanner_mode_changed(self, index: int) -> None:
+        """Persist scanner mode to bus so Scan page can sync."""
+        try:
+            opts = self._bus.get_scan_options() or {}
+            opts["scanner_tier"] = ("turbo", "ultra", "quantum")[min(index, 2)]
+            self._bus.set_scan_options(opts)
+        except Exception:
+            pass
+
+    def _on_toolbar_theme_toggle(self) -> None:
+        """Toggle between Gemini dark and light."""
+        if self._theme.current_theme_key == "gemini_light":
+            self._theme.apply_theme("gemini")
+            self._theme_toggle_btn.setText("Theme: Light")
+        else:
+            self._theme.apply_theme("gemini_light")
+            self._theme_toggle_btn.setText("Theme: Dark")
 
     def navigate_to(self, station_id: str) -> None:
         """Navigate to a station without gating."""

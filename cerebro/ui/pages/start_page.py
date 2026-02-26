@@ -35,29 +35,44 @@ class StartPage(BaseStation):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # LEFT SIDEBAR — exact Gemini locations
+        # LEFT SIDEBAR — Gemini locations (persistent)
         sidebar = QFrame()
         sidebar.setFixedWidth(280)
+        sidebar.setObjectName("LocationsSidebar")
         sb_layout = QVBoxLayout(sidebar)
-        sb_layout.addWidget(QLabel("Locations"))
+        loc_label = QLabel("Locations")
+        loc_label.setToolTip("Recently added scan roots. Click + Add Folder to start a scan.")
+        sb_layout.addWidget(loc_label)
         self.locations_list = QListWidget()
+        self.locations_list.setToolTip("Double-click a location to scan again")
         sb_layout.addWidget(self.locations_list)
         add_btn = QPushButton("+ Add Folder")
+        add_btn.setToolTip("Choose a folder to scan for duplicates (opens Scan page)")
         add_btn.clicked.connect(lambda: self.navigate_requested.emit("scan"))
         sb_layout.addWidget(add_btn)
         layout.addWidget(sidebar)
 
-        # CENTER HERO — Gemini drag-drop
+        # CENTER HERO — Gemini drag-drop (12px rounded, teal accent feel)
         hero = QFrame()
-        hero.setStyleSheet("background: qlineargradient(...); border-radius: 20px;")  # subtle gradient
+        hero.setObjectName("HeroDropZone")
+        hero.setStyleSheet("""
+            QFrame#HeroDropZone {
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #151922, stop:1 #0f1115);
+                border: 2px dashed #262c3a;
+                border-radius: 20px;
+            }
+            QFrame#HeroDropZone:hover { border-color: #00C4B4; }
+        """)
+        hero.setToolTip("Drop folders here to add them for scanning, or click Browse Computer")
         h_layout = QVBoxLayout(hero)
         h_layout.setAlignment(Qt.AlignCenter)
-        icon = QLabel("📁")  # replace with your SVG if you want
+        icon = QLabel("📁")
         icon.setStyleSheet("font-size: 120px;")
         h_layout.addWidget(icon)
         h_layout.addWidget(QLabel("Drop folders or files here"))
         h_layout.addWidget(QLabel("or"))
         btn = QPushButton("Browse Computer")
+        btn.setToolTip("Open Scan page to choose a folder and start duplicate scan")
         btn.clicked.connect(lambda: self.navigate_requested.emit("scan"))
         h_layout.addWidget(btn)
         layout.addWidget(hero, 1)

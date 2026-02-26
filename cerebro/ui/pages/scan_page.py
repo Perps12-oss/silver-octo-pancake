@@ -305,6 +305,7 @@ class ScanPage(BaseStation):
         accent = theme_token("accent")
         self._start_scan_btn = QPushButton("  ▶  Start Scan")
         self._start_scan_btn.setObjectName("ProminentScanButton")
+        self._start_scan_btn.setToolTip("Start duplicate scan with selected folder and scanner mode. Live progress and stats appear below.")
         self._start_scan_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._start_scan_btn.setMinimumHeight(64)
         self._start_scan_btn.setStyleSheet(f"""
@@ -661,12 +662,16 @@ class ScanPage(BaseStation):
         }
         
         info = tier_info.get(index, tier_info[0])
-        
-        # Show notification with scanner info
+        try:
+            opts = self._bus.get_scan_options() or {}
+            opts["scanner_tier"] = ("turbo", "ultra", "quantum")[min(index, 2)]
+            self._bus.set_scan_options(opts)
+        except Exception:
+            pass
         self._bus.notify(
             f"{info['icon']} {info['name']} selected",
             f"{info['speedup']} - {info['desc']}",
-            3000  # 3 seconds
+            3000
         )
 
     # -------------------------------------------------------------------------
@@ -734,8 +739,17 @@ class ScanPage(BaseStation):
         return
 
     def on_enter(self) -> None:
-        """Called when page is shown – no action needed."""
-        return
+        """Sync scanner tier from global toolbar/bus when page is shown."""
+        try:
+            opts = self._bus.get_scan_options() or {}
+            tier = (opts.get("scanner_tier") or "turbo").lower()
+            idx = {"turbo": 0, "ultra": 1, "quantum": 2}.get(tier, 0)
+            if getattr(self, "_scanner_tier_combo", None) is not None:
+                self._scanner_tier_combo.blockSignals(True)
+                self._scanner_tier_combo.setCurrentIndex(idx)
+                self._scanner_tier_combo.blockSignals(False)
+        except Exception:
+            pass
 
     def cleanup(self) -> None:
         """Safely stop any running scan and disconnect signals."""

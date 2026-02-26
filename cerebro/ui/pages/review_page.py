@@ -960,6 +960,10 @@ class ReviewPage(BaseStation):
         layout.addWidget(details)
 
         smart = QGroupBox("Smart Select (Applies to FILTERED groups)")
+        smart.setToolTip(
+            "One-click rules to auto-pick which file to keep in each duplicate group "
+            "(oldest, newest, largest, smallest, or first). Applies only to currently filtered groups."
+        )
         smart_layout = QVBoxLayout(smart)
 
         smart_buttons = [

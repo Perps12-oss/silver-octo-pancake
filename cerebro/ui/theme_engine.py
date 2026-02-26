@@ -610,6 +610,11 @@ def _builtin_themes() -> Dict[str, ThemeSpec]:
         )
 
     themes = {
+        # Gemini 2 (Red Dot) — Windows-tuned default
+        "gemini": t("gemini", "Gemini 2", "Red Dot design • teal accent", 
+                    "#0f1115", "#151922", "#00C4B4", "#00a89d", True),
+        "gemini_light": t("gemini_light", "Gemini 2 Light", "Clean & bright", 
+                          "#f0f9f8", "#ffffff", "#00C4B4", "#00a89d", False),
         # Core themes
         "dark": t("dark", "Midnight Operator", "for late-night deletions 🌙", 
                   "#0f1115", "#151922", "#7aa2ff", "#a78bfa", True),
@@ -735,7 +740,7 @@ class ThemeEngine(QObject):
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
         self._themes: Dict[str, ThemeSpec] = {}
-        self._current: str = "dark"
+        self._current: str = "gemini"
         self._preview: Optional[str] = None
         self._animation_enabled: bool = True
         
@@ -771,13 +776,13 @@ class ThemeEngine(QObject):
 
         self._themes = themes
         
-        # Restore saved theme or default to dark
+        # Restore saved theme or default to Gemini
         restored = self._load_theme_from_config()
         if restored and restored in self._themes:
             self._current = restored
         else:
             if self._current not in self._themes:
-                self._current = "dark"
+                self._current = "gemini"
 
         self._apply_to_app(self._themes[self._current])
 
