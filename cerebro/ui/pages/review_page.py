@@ -1206,7 +1206,9 @@ class ReviewPage(BaseStation):
         QShortcut(QKeySequence("Down"), self).activated.connect(self._next_file_in_table)
         QShortcut(QKeySequence("Space"), self).activated.connect(self._toggle_current_file)
         QShortcut(QKeySequence("Return"), self).activated.connect(self._open_ceremony)
-        QShortcut(QKeySequence("Delete"), self).activated.connect(self._open_ceremony)
+        # NOTE: Delete key is handled globally by MainWindow._on_delete_key() which
+        # calls confirm_delete_selected() → _open_ceremony(). Registering it here too
+        # causes a double-dialog bug (both shortcuts fire when ReviewPage has focus).
 
         for i in range(1, 6):
             QShortcut(QKeySequence(str(i)), self).activated.connect(
@@ -1658,11 +1660,14 @@ class ReviewPage(BaseStation):
             "recoverable_bytes": total_delete_size,
         }
 
+        # Include scan_id from last result for audit trail (Agent 4 improvement)
+        scan_id = str((self._result or {}).get("scan_id") or "")
         cleanup_data = {
             "groups": delete_groups,
             "stats": stats,
             "policy": {"mode": chosen_mode},
             "source": "review_page",
+            "scan_id": scan_id,
         }
         self.cleanup_confirmed.emit(cleanup_data)
 

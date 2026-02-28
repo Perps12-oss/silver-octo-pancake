@@ -181,14 +181,21 @@ class CerebroPipeline:
                     )
                 )
 
-        # Raise only if no keeper for all groups, or deletion requested but no operations produced
+        # Log any validation warnings (non-fatal — bad groups are skipped, valid ones proceed)
         if errors:
             msg = "; ".join(errors)
-            self._log(f"Deletion plan validation failed: {msg}", level="error")
-            raise ValueError(f"Deletion plan validation failed: {msg}")
+            self._log(f"Deletion plan warnings (skipped groups): {msg}", level="warning")
+        # Abort only if NO valid operations remain (nothing to do)
         if groups and not operations:
-            self._log("Deletion plan: groups present but no valid operations (all keepers missing or all delete paths missing)", level="error")
-            raise ValueError("Deletion plan: no valid operations (missing keepers or all delete paths missing)")
+            self._log(
+                "Deletion plan: groups present but no valid operations "
+                "(all keepers missing or all delete paths already gone)",
+                level="error",
+            )
+            raise ValueError(
+                "Deletion plan: no valid operations. "
+                "All keep files are missing or all delete targets have already been removed."
+            )
 
         stats = {
             "groups": len(groups),

@@ -505,13 +505,13 @@ class MainWindow(QMainWindow):
                 })
                 continue
 
-            # Legacy/old payload patterns (NOT SAFE to guess intent)
-            # Some old code used "paths" for candidates; that is ambiguous without keep.
+            # Legacy/old payload patterns — ambiguous without keep/delete keys; skip safely.
             if "paths" in g and ("keep" not in g or "delete" not in g):
-                raise ValueError(
-                    "ReviewPage emitted an ambiguous cleanup payload (missing keep/delete). "
-                    "Please update ReviewPage to emit DeletionPlan groups with keys: keep + delete."
+                log_debug(
+                    "[DEBUG] _normalize_deletion_plan: skipping ambiguous group "
+                    f"(has 'paths' but missing 'keep'/'delete') group_index={group_index}"
                 )
+                continue
 
         if not groups_out:
             raise ValueError("No valid deletion groups in payload (expected keep/delete per group).")
