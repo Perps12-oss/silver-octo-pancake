@@ -357,8 +357,10 @@ class MainWindow(QMainWindow):
         start.navigate_requested.connect(self.navigate_to)
         self._register("mission", start)
 
-        # Scan page
-        self._register("scan", ScanPage())
+        # Scan page (Gemini 2 complete state; Review Duplicates CTA navigates to review)
+        scan_page = ScanPage()
+        scan_page.navigate_requested.connect(self.navigate_to)
+        self._register("scan", scan_page)
 
         # Review page - cleanup wiring (intent only)
         review = ReviewPage()
@@ -606,18 +608,15 @@ class MainWindow(QMainWindow):
         self._toast.show_toast(title, msg, duration_ms=duration, action=toast_action)
 
     def _on_scan_completed(self, result: Dict[str, Any]) -> None:
-        """Handle scan completion - navigate to review."""
+        """Handle scan completion - load result into review; user clicks Review Duplicates on Scan page to open."""
         self._toast.show_toast(
             "Results ready ✅",
-            "Scan finished. Opening Review…",
+            "Review duplicates when ready.",
             duration_ms=1400,
-            action=ToastAction(text="Open now", callback_name="open_review"),
+            action=ToastAction(text="Open Review", callback_name="open_review"),
         )
-        # Hide scan banner now that the scan is complete
         if self._scan_banner:
             self._scan_banner.setVisible(False)
-
-        QTimer.singleShot(650, lambda: self.navigate_to("review"))
 
         review = self._pages.get("review")
         if hasattr(review, "load_scan_result"):
@@ -845,21 +844,26 @@ class MainWindow(QMainWindow):
                 # Defensive: show something but don't crash
                 self._toast.show_toast("Cleanup complete ✅", "Cleanup finished.", duration_ms=2600)
             else:
+                deleted_count = len(result.deleted)
+                log_info(f"[Delete] deletion_completed: deleted_count={deleted_count} scan_id={result.scan_id}")
                 self._toast.show_toast(
                     "Cleanup complete ✅",
-                    f"Deleted: {len(result.deleted)} · Failed: {len(result.failed)}",
+                    f"Deleted: {deleted_count} · Failed: {len(result.failed)}",
                     duration_ms=3200,
                 )
-
-            # Refresh review page to show updated state (if supported)
-            review = self._pages.get("review")
-            if review and hasattr(review, "refresh_after_deletion") and isinstance(result, DeletionResult):
+                # Single event: ReviewPage subscribes and refreshes + shows post-delete banner
                 try:
-                    review.refresh_after_deletion(result.deleted)
+                    self._bus.deletion_completed.emit({
+                        "deleted_paths": [str(p) for p in result.deleted],
+                        "scan_id": getattr(result, "scan_id", "") or "",
+                        "deleted_count": deleted_count,
+                    })
                 except Exception as e:
-                    log_error(f"[UI] Review refresh_after_deletion failed: {e}")
-            elif review and hasattr(review, "load_scan_result") and hasattr(review, "_result"):
-                # fallback: reload last result
+                    log_error(f"[UI] deletion_completed emit failed: {e}")
+
+            review = self._pages.get("review")
+            if review and not isinstance(result, DeletionResult) and hasattr(review, "load_scan_result") and hasattr(review, "_result"):
+                # fallback when result shape is unexpected
                 try:
                     review.load_scan_result(review._result)  # type: ignore[attr-defined]
                 except Exception as e:

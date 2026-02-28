@@ -104,6 +104,9 @@ class StateBus(QObject):
     scan_failed = Signal(str)               # error
     resume_scan_requested = Signal(dict)    # resume payload (history → scan)
 
+    # Deletion (success only; payload: deleted_paths, scan_id, deleted_count)
+    deletion_completed = Signal(dict)
+
     # Station status (for Intelligent Spine)
     station_status_updated = Signal(StationStatusData)
 

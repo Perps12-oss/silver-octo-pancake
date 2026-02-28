@@ -18,19 +18,24 @@ REFACTORING ENHANCEMENTS (2026-02-12):
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, Slot, Signal, QTimer, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
+    QProgressBar,
     QPushButton,
     QScrollArea,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -135,6 +140,36 @@ def validate_folder_path(path: str) -> bool:
         return False
 
 
+def format_duration_short(seconds: float) -> str:
+    """Format seconds as '2m 14s' or '45s'."""
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    m = int(seconds // 60)
+    s = int(seconds % 60)
+    if s:
+        return f"{m}m {s}s"
+    return f"{m}m"
+
+
+def space_freeable_from_result(result: dict) -> int:
+    """Sum recoverable_bytes from result groups (bytes)."""
+    total = 0
+    for g in (result or {}).get("groups") or []:
+        total += int(g.get("recoverable_bytes", g.get("recoverable", 0)) or 0)
+    return total
+
+
+def format_bytes_short(num_bytes: int) -> str:
+    """Format as XX.X GB or MB."""
+    if num_bytes >= 1024 ** 3:
+        return f"{num_bytes / (1024 ** 3):.1f} GB"
+    if num_bytes >= 1024 ** 2:
+        return f"{num_bytes / (1024 ** 2):.1f} MB"
+    if num_bytes >= 1024:
+        return f"{num_bytes / 1024:.1f} KB"
+    return f"{num_bytes} B"
+
+
 def create_scan_config(
     root_path: str,
     options_dict: dict[str, Any],
@@ -168,13 +203,12 @@ def create_scan_config(
 class ScanPage(BaseStation):
     """
     Minimalistic scan page; snapshot-driven; modern scaffold + theme tokens only.
-
-    Signals (inherited from BaseStation):
-        - station_id, station_title: used by navigation system.
+    Shows Gemini 2 "Scan Complete" state when scan finishes (hero + 4 cards + Review CTA).
     """
 
     station_id = "scan"
     station_title = "Scan"
+    navigate_requested = Signal(str)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -190,6 +224,9 @@ class ScanPage(BaseStation):
         self._current_snapshot: Optional[LiveScanSnapshot] = None
         self._scan_in_progress = False
         self._current_scan_id: Optional[str] = None
+        self._scan_start_time: Optional[float] = None
+        self._last_scan_result: Optional[dict] = None
+        self._last_scan_duration_sec: float = 0.0
 
         # UI state (immutable)
         self._current_state = ScanUIState(
@@ -280,7 +317,7 @@ class ScanPage(BaseStation):
         if hasattr(self, "_advanced_container"):
             self._advanced_container.setVisible(is_advanced)
         if hasattr(self, "_advanced_hint"):
-            self._advanced_hint.setVisible(not is_advanced)
+            self._advanced_hint.setVisible(False)
         try:
             from cerebro.services.config import load_config, save_config
             config = load_config()
@@ -309,8 +346,9 @@ class ScanPage(BaseStation):
         self._build_folder_picker(top_layout)
         self._build_scan_filters(top_layout)
         self._build_prominent_scan_button(top_layout)
-        self._advanced_hint = QLabel("Advanced settings are in Advanced mode or Settings → Scanning.")
+        self._advanced_hint = QLabel("Advanced settings are in Settings → Scanning.")
         self._advanced_hint.setStyleSheet(f"font-size: 12px; color: {theme_token('muted')};")
+        self._advanced_hint.setVisible(False)
         top_layout.addWidget(self._advanced_hint)
         self._build_stat_row(top_layout)
 
@@ -322,7 +360,7 @@ class ScanPage(BaseStation):
         scroll.setMinimumHeight(120)
         content_layout.addWidget(scroll, 1)
 
-        # Bottom: live scan panel with guaranteed min height so it's never squashed
+        # Bottom: live scan panel (hidden when complete state is shown)
         self._live = LiveScanPanel()
         self._live.setMinimumWidth(LayoutMetrics.MIN_LIVE_WIDTH)
         self._live.setMinimumHeight(LayoutMetrics.MIN_LIVE_PANEL_HEIGHT)
@@ -330,7 +368,146 @@ class ScanPage(BaseStation):
         live_card.set_content(self._live)
         content_layout.addWidget(live_card, 0)
 
-        self._scaffold.set_content(content)
+        self._idle_content = content
+
+        # Stack: 0 = idle/scanning, 1 = Scan Complete (Gemini 2 minimal)
+        self._content_stack = QStackedWidget()
+        self._content_stack.addWidget(self._idle_content)
+        self._complete_content = self._build_complete_view()
+        self._content_stack.addWidget(self._complete_content)
+        self._content_stack.setCurrentIndex(0)
+
+        self._scaffold.set_content(self._content_stack)
+
+    def _build_complete_view(self) -> QWidget:
+        """Gemini 2 Scan Complete state: hero, 4 stat cards, Review CTA, New Scan link."""
+        accent = theme_token("accent")
+        muted = theme_token("muted")
+        panel = theme_token("panel")
+        text = theme_token("text")
+
+        wrap = QWidget()
+        layout = QVBoxLayout(wrap)
+        layout.setContentsMargins(LayoutMetrics.PAGE_MARGIN * 2, 40, LayoutMetrics.PAGE_MARGIN * 2, 40)
+        layout.setSpacing(28)
+
+        # Hero: Scan Complete ✓
+        hero_frame = QFrame()
+        hero_frame.setObjectName("ScanCompleteHero")
+        hero_layout = QVBoxLayout(hero_frame)
+        hero_layout.setSpacing(16)
+        hero_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self._complete_title = QLabel("Scan Complete ✓")
+        self._complete_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._complete_title.setStyleSheet(f"font-size: 32px; font-weight: bold; color: {text};")
+        hero_layout.addWidget(self._complete_title)
+
+        self._complete_progress = QProgressBar()
+        self._complete_progress.setMaximum(100)
+        self._complete_progress.setValue(100)
+        self._complete_progress.setTextVisible(False)
+        self._complete_progress.setFixedHeight(6)
+        self._complete_progress.setStyleSheet(f"""
+            QProgressBar {{ background: {panel}; border-radius: 3px; }}
+            QProgressBar::chunk {{ background: #22c55e; border-radius: 3px; }}
+        """)
+        hero_layout.addWidget(self._complete_progress)
+
+        self._complete_subtitle = QLabel("Found 0 duplicate groups (0 files)")
+        self._complete_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._complete_subtitle.setStyleSheet(f"font-size: 15px; color: {muted};")
+        hero_layout.addWidget(self._complete_subtitle)
+
+        layout.addWidget(hero_frame)
+
+        # 4 stat cards
+        cards_layout = QGridLayout()
+        cards_layout.setSpacing(20)
+        self._complete_card_groups = StatCard("Groups found", "0", icon=None)
+        self._complete_card_duplicates = StatCard("Duplicates", "0", icon=None)
+        self._complete_card_space = StatCard("Space you can free", "0 B", icon=None)
+        self._complete_card_time = StatCard("Time taken", "—", icon=None)
+        cards_layout.addWidget(self._complete_card_groups, 0, 0)
+        cards_layout.addWidget(self._complete_card_duplicates, 0, 1)
+        cards_layout.addWidget(self._complete_card_space, 0, 2)
+        cards_layout.addWidget(self._complete_card_time, 0, 3)
+        layout.addLayout(cards_layout)
+
+        # Big teal CTA
+        layout.addSpacing(12)
+        self._review_duplicates_btn = QPushButton("Review Duplicates")
+        self._review_duplicates_btn.setObjectName("ReviewDuplicatesCTA")
+        self._review_duplicates_btn.setMinimumHeight(56)
+        self._review_duplicates_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._review_duplicates_btn.setStyleSheet(f"""
+            QPushButton#ReviewDuplicatesCTA {{
+                background: {accent};
+                color: white;
+                border: none;
+                border-radius: 14px;
+                font-size: 18px;
+                font-weight: bold;
+                padding: 14px 32px;
+            }}
+            QPushButton#ReviewDuplicatesCTA:hover {{ opacity: 0.95; }}
+        """)
+        self._review_duplicates_btn.clicked.connect(self._on_review_duplicates_clicked)
+        layout.addWidget(self._review_duplicates_btn, 0, Qt.AlignmentFlag.AlignCenter)
+
+        # Tiny New Scan link + optional Advanced
+        row = QHBoxLayout()
+        row.setSpacing(24)
+        self._new_scan_link = QPushButton("New Scan")
+        self._new_scan_link.setFlat(True)
+        self._new_scan_link.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._new_scan_link.setStyleSheet(f"font-size: 12px; color: {muted}; background: transparent; border: none;")
+        self._new_scan_link.clicked.connect(self._on_new_scan_clicked)
+        row.addWidget(self._new_scan_link, 0, Qt.AlignmentFlag.AlignCenter)
+        row.addStretch()
+        layout.addLayout(row)
+
+        layout.addStretch()
+        return wrap
+
+    def _on_review_duplicates_clicked(self) -> None:
+        """Navigate to Review (results already loaded by MainWindow)."""
+        self.navigate_requested.emit("review")
+
+    def _on_new_scan_clicked(self) -> None:
+        """Return to idle/scanning view."""
+        self._content_stack.setCurrentIndex(0)
+        self._last_scan_result = None
+        if hasattr(self, "_sticky") and self._sticky:
+            self._sticky.setVisible(True)
+
+    def _show_complete_state(self) -> None:
+        """Populate and show Scan Complete view; fade progress bar after 1s."""
+        r = self._last_scan_result or {}
+        groups_raw = r.get("groups") or []
+        group_count = len(groups_raw)
+        file_count = sum(len(g.get("paths") or g.get("files") or g.get("items") or []) for g in groups_raw)
+        space_bytes = space_freeable_from_result(r)
+        time_str = format_duration_short(self._last_scan_duration_sec) if self._last_scan_duration_sec else "—"
+
+        self._complete_subtitle.setText(f"Found {group_count} duplicate groups ({file_count} files)")
+        self._complete_card_groups.set_value(str(group_count))
+        self._complete_card_duplicates.set_value(str(file_count))
+        self._complete_card_space.set_value(format_bytes_short(space_bytes))
+        self._complete_card_time.set_value(time_str)
+
+        self._complete_progress.setVisible(True)
+        self._complete_progress.setValue(100)
+        QTimer.singleShot(1000, self._fade_complete_progress)
+
+        if hasattr(self, "_sticky") and self._sticky:
+            self._sticky.setVisible(False)
+        self._content_stack.setCurrentIndex(1)
+
+    def _fade_complete_progress(self) -> None:
+        """Hide the 100% progress bar after 1s (Gemini minimal)."""
+        if hasattr(self, "_complete_progress") and self._complete_progress:
+            self._complete_progress.setVisible(False)
 
     def _build_folder_picker(self, parent_layout: QVBoxLayout) -> None:
         """Add the modern folder picker widget."""
@@ -480,7 +657,11 @@ class ScanPage(BaseStation):
         # Resume from history
         if hasattr(self._bus, "resume_scan_requested"):
             self._bus.resume_scan_requested.connect(self._on_resume_requested)
-        
+
+        # Programmatic scan start (e.g. ReviewPage Rescan)
+        if hasattr(self._bus, "scan_requested"):
+            self._bus.scan_requested.connect(self._on_scan_requested_from_bus)
+
         # Scanner tier selection change
         if hasattr(self, "_scanner_tier_combo"):
             self._scanner_tier_combo.currentIndexChanged.connect(self._on_scanner_tier_changed)
@@ -671,6 +852,29 @@ class ScanPage(BaseStation):
             # Malformed payload – ignore and let user pick folder manually
             pass
 
+    @Slot(dict)
+    def _on_scan_requested_from_bus(self, config: dict[str, Any]) -> None:
+        """Start scan with given config (e.g. from ReviewPage Rescan). Async; no UI freeze."""
+        if self._controller.is_running():
+            return
+        config = dict(config or {})
+        root = str(config.get("root") or config.get("scan_root") or "")
+        if not root or not Path(root).is_dir():
+            return
+        try:
+            self._folder_picker.set_path(root)
+        except Exception:
+            pass
+        self._set_ui_state(ScanUIState(
+            is_scanning=True,
+            status_text=StatusText.SCANNING,
+            start_enabled=False,
+            cancel_enabled=True,
+            options_enabled=False,
+        ))
+        self._live.reset()
+        self._controller.start_scan(config)
+
     # -------------------------------------------------------------------------
     # Legacy slot stubs (required for backward compatibility)
     # -------------------------------------------------------------------------
@@ -764,9 +968,10 @@ class ScanPage(BaseStation):
 
     @Slot(str)
     def _on_scan_started(self, scan_id: str) -> None:
-        """Store scan ID and notify user."""
+        """Store scan ID and start time; notify user."""
         self._current_scan_id = scan_id
         self._scan_in_progress = True
+        self._scan_start_time = time.time()
         self._bus.notify(
             "Scan started",
             f"Scan ID: {scan_id}",
@@ -795,15 +1000,21 @@ class ScanPage(BaseStation):
 
     @Slot(dict)
     def _on_scan_completed(self, result: dict[str, Any]) -> None:
-        """Attach scan_id if missing and notify user."""
+        """Store result, show Gemini 2 Scan Complete state; user clicks Review to open."""
         self._scan_in_progress = False
         if "scan_id" not in result and self._current_scan_id:
             result["scan_id"] = self._current_scan_id
+        self._last_scan_result = result
+        self._last_scan_duration_sec = (time.time() - self._scan_start_time) if self._scan_start_time else 0.0
+        self._scan_start_time = None
+
         self._bus.notify(
             "Results ready",
-            "Opening Review…",
+            "Review duplicates when ready.",
             NotifyDuration.RESULTS_READY,
         )
+
+        self._show_complete_state()
 
     # -------------------------------------------------------------------------
     # Lifecycle management (BaseStation interface)
@@ -844,7 +1055,7 @@ class ScanPage(BaseStation):
     def reset(self) -> None:
         """
         Full reset to idle state.
-        Keeps folder path, clears snapshot and scan ID.
+        Keeps folder path, clears snapshot and scan ID; shows idle/scanning view.
         """
         if self._scan_in_progress:
             try:
@@ -854,6 +1065,11 @@ class ScanPage(BaseStation):
         self._scan_in_progress = False
         self._current_scan_id = ""
         self._current_snapshot = None
+        self._last_scan_result = None
+        if hasattr(self, "_content_stack") and self._content_stack.currentIndex() != 0:
+            self._content_stack.setCurrentIndex(0)
+        if hasattr(self, "_sticky") and self._sticky:
+            self._sticky.setVisible(True)
         self._set_ui_state(ScanUIState(
             is_scanning=False,
             status_text=StatusText.IDLE,

@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
     QStackedWidget, QSizePolicy, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QMessageBox, QInputDialog, QFileDialog,
     QProgressBar, QTextEdit, QGroupBox, QToolButton,
-    QGraphicsDropShadowEffect, QApplication
+    QGraphicsDropShadowEffect, QApplication, QLineEdit, QMenu,
 )
 
 from cerebro.ui.components.modern import ContentCard, PageScaffold, StickyActionBar
@@ -555,11 +555,11 @@ class DualPaneComparison(QFrame):
 
         self.similarity_label = QLabel("100%")
         self.similarity_label.setAlignment(Qt.AlignCenter)
-        self.similarity_label.setStyleSheet("font-size: 28px; font-weight: bold; color: #22c55e;")
+        self.similarity_label.setStyleSheet("font-size: 42px; font-weight: bold; color: #22c55e;")
 
         self.similarity_text = QLabel("Similarity")
         self.similarity_text.setAlignment(Qt.AlignCenter)
-        self.similarity_text.setStyleSheet("font-size: 11px; color: #888;")
+        self.similarity_text.setStyleSheet("font-size: 12px; color: #888;")
 
         cl.addStretch()
         cl.addWidget(self.similarity_label)
@@ -668,7 +668,7 @@ class DualPaneComparison(QFrame):
             color = "#eab308"
         else:
             color = "#ef4444"
-        self.similarity_label.setStyleSheet(f"font-size: 28px; font-weight: bold; color: {color};")
+        self.similarity_label.setStyleSheet(f"font-size: 42px; font-weight: bold; color: {color};")
 
         if len(paths) >= 1:
             self._load_image(self.left_img, self.left_info, paths[0])
@@ -883,6 +883,7 @@ class ReviewPage(BaseStation):
         self._thumb_loader = AsyncThumbnailLoader(self)
 
         self._build_gemini_ui()
+        self.left_panel.setMinimumWidth(260)
         self._setup_keyboard_shortcuts()
         self._wire()
         self.apply_theme()
@@ -893,60 +894,55 @@ class ReviewPage(BaseStation):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        self._scaffold = PageScaffold(self, show_sidebar=False, show_sticky_action=True)
+        self._scaffold = PageScaffold(self, show_sidebar=False, show_sticky_action=False)
         self.step_bar = self._build_step_bar()
         self._scaffold.set_header(self.step_bar)
 
-        # Main content: card with splitter (left | center | right)
+        # Prominent large delete button (used in bottom bar)
+        self._large_delete_btn = QPushButton("Delete (0)")
+        self._large_delete_btn.setObjectName("LargeDeleteButton")
+        self._large_delete_btn.setMinimumHeight(44)
+        self._large_delete_btn.setCursor(Qt.PointingHandCursor)
+        self._large_delete_btn.setToolTip("Delete selected files. Routes through confirmation.")
+        self._large_delete_btn.clicked.connect(self._open_ceremony)
+        self._large_delete_btn.setEnabled(False)
+
+        # Main content: splitter left (slim/collapsible) | center (hero)
         splitter = QSplitter(Qt.Horizontal)
         splitter.setHandleWidth(4)
         splitter.setChildrenCollapsible(False)
 
         self.left_panel = self._build_left_panel()
         self.center_panel = self._build_center_panel()
-        self.right_panel = self._build_right_panel()
         splitter.addWidget(self.left_panel)
         splitter.addWidget(self.center_panel)
-        splitter.addWidget(self.right_panel)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 2)
-        splitter.setStretchFactor(2, 1)
-
-        # Prominent large delete button (created early for status bar)
-        self._large_delete_btn = QPushButton("Delete (0)")
-        self._large_delete_btn.setObjectName("LargeDeleteButton")
-        self._large_delete_btn.setMinimumHeight(48)
-        self._large_delete_btn.setCursor(Qt.PointingHandCursor)
-        self._large_delete_btn.setToolTip("Delete selected files. Routes through confirmation.")
-        self._large_delete_btn.clicked.connect(self._open_ceremony)
-        self._large_delete_btn.setEnabled(False)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
 
         content_wrapper = QWidget()
         wrap_layout = QVBoxLayout(content_wrapper)
-        wrap_layout.setContentsMargins(0, 0, 0, 0)
+        wrap_layout.setContentsMargins(24, 0, 24, 0)
         wrap_layout.setSpacing(0)
         card = ContentCard()
         card.set_content(splitter)
         wrap_layout.addWidget(card, 1)
 
-        self.status_bar = self._build_status_bar()
-        wrap_layout.addWidget(self.status_bar)
+        self._post_delete_banner = self._build_post_delete_banner()
+        wrap_layout.addWidget(self._post_delete_banner)
+
+        self._bottom_bar = self._build_bottom_bar()
+        wrap_layout.addWidget(self._bottom_bar)
 
         self._scaffold.set_content(content_wrapper)
 
-        self._sticky = StickyActionBar()
-        self._sticky.set_primary_text("Export List")
-        self._sticky.primary_clicked.connect(self._on_export_list)
-        self._scaffold.set_sticky_action(self._sticky)
-
         root.addWidget(self._scaffold, 1)
 
-        # Floating delete button (Gemini teal accent style)
+        # Floating delete button (unchanged behavior/placement)
         self.floating_delete = FloatingDeleteButton(self)
         self.floating_delete.clicked_with_count.connect(self._on_floating_delete_clicked)
 
-        # Smart Select FAB (Gemini style)
-        self.smart_select_fab = QPushButton("Smart Select\n0 safe", self)
+        # Smart Select = single FAB + popover menu (5 rules)
+        self.smart_select_fab = QPushButton("Smart Select • 0 safe", self)
         self.smart_select_fab.setObjectName("SmartSelectFAB")
         self.smart_select_fab.setFixedSize(140, 52)
         self.smart_select_fab.setCursor(Qt.PointingHandCursor)
@@ -971,17 +967,34 @@ class ReviewPage(BaseStation):
             self.comparison.set_compare_mode(checked)
 
     def _on_smart_select_fab_clicked(self) -> None:
-        """Focus Smart Select panel (right side); user can then click a rule."""
-        self.focus_smart_select()
+        """Open Smart Select popover menu with 5 rules."""
+        self._show_smart_select_popover()
 
     def focus_smart_select(self) -> None:
-        """Focus Smart Select panel (used by Ctrl+S). Raises right panel so rules are visible."""
-        if hasattr(self, "right_panel") and self.right_panel:
-            self.right_panel.raise_()
-            self.right_panel.setFocus()
-        if hasattr(self, "smart_select_fab") and self.smart_select_fab:
-            self.smart_select_fab.setFocus()
+        """Used by Ctrl+S: open Smart Select popover menu."""
+        self._show_smart_select_popover()
         self.setFocus()
+
+    def _show_smart_select_popover(self) -> None:
+        """Show popover menu with 5 Smart Select rules."""
+        if not hasattr(self, "smart_select_fab") or self.smart_select_fab is None:
+            return
+        menu = QMenu(self)
+        menu.setStyleSheet(f"""
+            QMenu {{ background: {theme_token('panel')}; border: 1px solid {theme_token('line')}; border-radius: 12px; padding: 8px; }}
+            QMenu::item {{ padding: 10px 20px; color: {theme_token('text')}; border-radius: 8px; }}
+            QMenu::item:selected {{ background: {theme_token('accent')}; color: white; }}
+        """)
+        for text, callback in [
+            ("Keep Oldest in Each", self._smart_keep_oldest),
+            ("Keep Newest in Each", self._smart_keep_newest),
+            ("Keep Largest in Each", self._smart_keep_largest),
+            ("Keep Smallest in Each", self._smart_keep_smallest),
+            ("Keep First in Each", self._smart_keep_first),
+        ]:
+            action = menu.addAction(text)
+            action.triggered.connect(callback)
+        menu.exec(self.smart_select_fab.mapToGlobal(self.smart_select_fab.rect().bottomLeft()))
 
     def confirm_delete_selected(self) -> None:
         """Called by global Delete shortcut."""
@@ -1004,19 +1017,20 @@ class ReviewPage(BaseStation):
 
     def _position_floating_button(self):
         margin = 30
-        if hasattr(self, 'smart_select_fab'):
-            self.smart_select_fab.show()
-            self.smart_select_fab.move(
-                self.width() - self.smart_select_fab.width() - margin - 200,
-                self.height() - self.smart_select_fab.height() - margin - 40
-            )
-            self.smart_select_fab.raise_()
-        if hasattr(self, 'floating_delete'):
+        bottom_y = self.height() - 60 - margin
+        if hasattr(self, 'floating_delete') and self.floating_delete:
             self.floating_delete.move(
                 self.width() - self.floating_delete.width() - margin,
-                self.height() - self.floating_delete.height() - margin - 40
+                bottom_y
             )
             self.floating_delete.raise_()
+        if hasattr(self, 'smart_select_fab') and self.smart_select_fab:
+            self.smart_select_fab.show()
+            self.smart_select_fab.move(
+                self.width() - margin - (self.floating_delete.width() if hasattr(self, 'floating_delete') and self.floating_delete else 180) - self.smart_select_fab.width() - 12,
+                bottom_y
+            )
+            self.smart_select_fab.raise_()
 
     def _build_step_bar(self):
         bar = QFrame()
@@ -1024,7 +1038,7 @@ class ReviewPage(BaseStation):
         bar.setFixedHeight(50)
 
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(20, 8, 20, 8)
+        layout.setContentsMargins(24, 10, 24, 10)
         layout.setSpacing(20)
 
         acc = theme_token("accent")
@@ -1062,12 +1076,27 @@ class ReviewPage(BaseStation):
     def _build_left_panel(self):
         panel = QFrame()
         panel.setObjectName("LeftPanel")
-        panel.setMinimumWidth(250)
-        panel.setMaximumWidth(350)
+        self._left_panel_expanded = True
+        panel.setMinimumWidth(80)
+        panel.setMaximumWidth(320)
 
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(16)
+        layout.setContentsMargins(12, 16, 12, 16)
+        layout.setSpacing(12)
+
+        # Collapse toggle "Groups"
+        self._groups_toggle_btn = QPushButton("Groups ▼")
+        self._groups_toggle_btn.setObjectName("GroupsToggle")
+        self._groups_toggle_btn.setCursor(Qt.PointingHandCursor)
+        self._groups_toggle_btn.clicked.connect(self._toggle_left_panel)
+        layout.addWidget(self._groups_toggle_btn)
+
+        # Jump to group (visible when collapsed)
+        self._jump_to_group_edit = QLineEdit()
+        self._jump_to_group_edit.setPlaceholderText("Jump to #")
+        self._jump_to_group_edit.setMaximumWidth(72)
+        self._jump_to_group_edit.returnPressed.connect(self._on_jump_to_group)
+        layout.addWidget(self._jump_to_group_edit)
 
         header = QHBoxLayout()
         self.select_all_cb = QCheckBox("Select All for Delete")
@@ -1082,11 +1111,11 @@ class ReviewPage(BaseStation):
         layout.addLayout(header)
 
         filter_layout = QHBoxLayout()
-        filter_layout.setSpacing(12)
+        filter_layout.setSpacing(8)
         filter_layout.addWidget(QLabel("Filter:"))
         self.filter_combo = QComboBox()
-        self.filter_combo.setMinimumWidth(180)
-        self.filter_combo.setMinimumHeight(36)
+        self.filter_combo.setMinimumWidth(140)
+        self.filter_combo.setMinimumHeight(32)
         self.filter_combo.addItems(["All Files", "Images", "Videos", "Audio", "Archives", "Documents", "Other"])
         self.filter_combo.currentTextChanged.connect(self._on_filter_changed)
         filter_layout.addWidget(self.filter_combo, 1)
@@ -1106,163 +1135,124 @@ class ReviewPage(BaseStation):
 
         self.left_summary = QLabel("0 groups")
         self.left_summary.setAlignment(Qt.AlignCenter)
-        self.left_summary.setStyleSheet("font-size: 12px; color: #888; padding: 8px;")
+        self.left_summary.setStyleSheet("font-size: 11px; color: #888; padding: 6px;")
         layout.addWidget(self.left_summary)
 
+        self._jump_to_group_edit.hide()
         return panel
+
+    def _toggle_left_panel(self):
+        self._left_panel_expanded = not self._left_panel_expanded
+        if self._left_panel_expanded:
+            self.left_panel.setMaximumWidth(320)
+            self._groups_toggle_btn.setText("Groups ▼")
+            for i in [self.select_all_cb, self.filter_combo, self.group_list, self.left_summary]:
+                i.show()
+            self._jump_to_group_edit.hide()
+        else:
+            self.left_panel.setMaximumWidth(100)
+            self._groups_toggle_btn.setText("Groups ▶")
+            for i in [self.select_all_cb, self.filter_combo, self.group_list, self.left_summary]:
+                i.hide()
+            self._jump_to_group_edit.show()
+
+    def _on_jump_to_group(self):
+        try:
+            text = (self._jump_to_group_edit.text() or "").strip()
+            if not text:
+                return
+            num = int(text)
+            if 1 <= num <= len(self._filtered_groups):
+                self._current_group_idx = num - 1
+                self._update_display()
+            self._jump_to_group_edit.clear()
+        except ValueError:
+            pass
 
     def _build_center_panel(self):
         panel = QFrame()
         panel.setObjectName("CenterPanel")
 
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(16)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(20)
 
+        # Slim nav: subtle arrows + group counter
         nav = QHBoxLayout()
-        self.prev_group_btn = QPushButton("◀ Previous (Left)")
+        self.prev_group_btn = QPushButton("◀")
+        self.prev_group_btn.setObjectName("NavArrowBtn")
+        self.prev_group_btn.setFixedSize(44, 36)
+        self.prev_group_btn.setCursor(Qt.PointingHandCursor)
         self.prev_group_btn.clicked.connect(self._prev_group)
 
         self.group_counter = QLabel("Group 1 of 1")
         self.group_counter.setAlignment(Qt.AlignCenter)
-        self.group_counter.setStyleSheet("font-weight: bold; font-size: 14px;")
+        self.group_counter.setStyleSheet("font-weight: 600; font-size: 14px; color: #e7ecf2;")
 
-        self.next_group_btn = QPushButton("Next (Right) ▶")
+        self.next_group_btn = QPushButton("▶")
+        self.next_group_btn.setObjectName("NavArrowBtn")
+        self.next_group_btn.setFixedSize(44, 36)
+        self.next_group_btn.setCursor(Qt.PointingHandCursor)
         self.next_group_btn.clicked.connect(self._next_group)
 
         nav.addWidget(self.prev_group_btn)
         nav.addWidget(self.group_counter, 1)
         nav.addWidget(self.next_group_btn)
-
         layout.addLayout(nav)
 
+        # Hero: DualPaneComparison (generous space)
         self.comparison = DualPaneComparison()
         self.comparison.file_selected.connect(self._on_comparison_keep_selected)
         layout.addWidget(self.comparison, 1)
 
-        self.file_list_label = QLabel("Files in this group (Space to toggle, 1-5 to keep specific):")
-        self.file_list_label.setStyleSheet("font-weight: bold; margin-top: 8px;")
-        layout.addWidget(self.file_list_label)
+        # One-line file detail (replaces right-panel preview)
+        self.center_detail_line = QLabel("")
+        self.center_detail_line.setStyleSheet("font-size: 12px; color: #94a3b8; padding: 4px 0;")
+        self.center_detail_line.setWordWrap(True)
+        layout.addWidget(self.center_detail_line)
+
+        # File table behind "Show all files in group" expander (default hidden)
+        self._files_expander_btn = QPushButton("Show all files in group")
+        self._files_expander_btn.setCheckable(True)
+        self._files_expander_btn.setChecked(False)
+        self._files_expander_btn.setCursor(Qt.PointingHandCursor)
+        self._files_expander_btn.toggled.connect(self._on_files_expander_toggled)
+        layout.addWidget(self._files_expander_btn)
 
         self.file_table = QTableWidget()
         self.file_table.setColumnCount(3)
         self.file_table.setHorizontalHeaderLabels(["Delete", "File", "Size"])
         self.file_table.horizontalHeader().setStretchLastSection(True)
-        self.file_table.setMaximumHeight(150)
+        self.file_table.setMaximumHeight(180)
         self.file_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         layout.addWidget(self.file_table)
+        self.file_table.setVisible(False)
 
         return panel
 
-    def _build_right_panel(self):
-        panel = QFrame()
-        panel.setObjectName("RightPanel")
-        panel.setMinimumWidth(280)
-        panel.setMaximumWidth(400)
+    def _on_files_expander_toggled(self, checked: bool):
+        if hasattr(self, "file_table"):
+            self.file_table.setVisible(checked)
+        if hasattr(self, "_files_expander_btn"):
+            self._files_expander_btn.setText("Hide files in group" if checked else "Show all files in group")
 
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(16)
-
-        preview_header_row = QHBoxLayout()
-        preview_header = QLabel("Preview")
-        preview_header.setStyleSheet("font-size: 16px; font-weight: bold;")
-        preview_header.setToolTip("Preview selected file. Pane is dockable and resizable; use zoom/compare for images.")
-        preview_header_row.addWidget(preview_header)
-        self.compare_mode_cb = QCheckBox("Compare")
-        self.compare_mode_cb.setToolTip("Side-by-side compare mode for duplicate files in this group.")
-        self.compare_mode_cb.toggled.connect(self._on_compare_mode_toggled)
-        preview_header_row.addStretch()
-        preview_header_row.addWidget(self.compare_mode_cb)
-        layout.addLayout(preview_header_row)
-
-        self.preview_frame = QFrame()
-        self.preview_frame.setMinimumSize(260, 260)
-        self.preview_frame.setStyleSheet("background: #0a0a0a; border-radius: 12px;")
-        preview_layout = QVBoxLayout(self.preview_frame)
-
-        self.preview_label = QLabel("No preview")
-        self.preview_label.setAlignment(Qt.AlignCenter)
-        self.preview_label.setStyleSheet("font-size: 48px;")
-        preview_layout.addWidget(self.preview_label)
-
-        layout.addWidget(self.preview_frame)
-
-        details = QGroupBox("File Details")
-        details_layout = QVBoxLayout(details)
-
-        self.detail_name = QLabel("Name: -")
-        self.detail_name.setWordWrap(True)
-        self.detail_path = QLabel("Path: -")
-        self.detail_path.setWordWrap(True)
-        self.detail_size = QLabel("Size: -")
-        self.detail_modified = QLabel("Modified: -")
-        self.detail_category = QLabel("Category: -")
-
-        for lbl in [self.detail_name, self.detail_path, self.detail_size, self.detail_modified, self.detail_category]:
-            lbl.setStyleSheet("font-size: 12px; padding: 2px 0;")
-            details_layout.addWidget(lbl)
-
-        details_layout.addStretch()
-        layout.addWidget(details)
-
-        smart = QGroupBox("Smart Select (Applies to FILTERED groups)")
-        smart.setToolTip(
-            "One-click rules to auto-pick which file to keep in each duplicate group "
-            "(oldest, newest, largest, smallest, or first). Applies only to currently filtered groups."
-        )
-        smart_layout = QVBoxLayout(smart)
-
-        smart_buttons = [
-            ("Keep Oldest in Each", self._smart_keep_oldest),
-            ("Keep Newest in Each", self._smart_keep_newest),
-            ("Keep Largest in Each", self._smart_keep_largest),
-            ("Keep Smallest in Each", self._smart_keep_smallest),
-            ("Keep First in Each", self._smart_keep_first),
-        ]
-
-        for text, callback in smart_buttons:
-            btn = QPushButton(text)
-            btn.clicked.connect(callback)
-            btn.setStyleSheet("""
-                QPushButton {
-                    background: rgba(59,130,246,0.15);
-                    border: 1px solid rgba(59,130,246,0.3);
-                    border-radius: 8px;
-                    padding: 8px;
-                    text-align: left;
-                }
-                QPushButton:hover {
-                    background: rgba(59,130,246,0.25);
-                }
-            """)
-            smart_layout.addWidget(btn)
-
-        layout.addWidget(smart)
-        layout.addStretch()
-
-        return panel
-
-    def _build_status_bar(self):
+    def _build_bottom_bar(self):
+        """Clean 3 elements: status text | Export List | Delete Selected (X)."""
         bar = QFrame()
         bar.setObjectName("StatusBar")
         bar.setFixedHeight(52)
 
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(20, 8, 20, 8)
+        layout.setSpacing(20)
 
         self.status_text = QLabel("Ready")
-        layout.addWidget(self.status_text)
+        self.status_text.setStyleSheet(f"font-size: 13px; color: {theme_token('muted')};")
+        layout.addWidget(self.status_text, 1)
 
-        layout.addStretch()
-
-        self.selection_stats = QLabel("0 files selected for deletion (0 B)")
-        self.selection_stats.setStyleSheet("font-weight: bold; color: #ef4444;")
+        self.selection_stats = QLabel("")
+        self.selection_stats.setStyleSheet("font-size: 12px; color: #94a3b8;")
         layout.addWidget(self.selection_stats)
-
-        # Prominent large delete button (unified orchestration)
-        if hasattr(self, "_large_delete_btn") and self._large_delete_btn:
-            layout.addWidget(self._large_delete_btn)
 
         self.export_list_btn = QPushButton("Export List")
         self.export_list_btn.setToolTip("Export current duplicate list to CSV or JSON.")
@@ -1270,10 +1260,47 @@ class ReviewPage(BaseStation):
         self.export_list_btn.clicked.connect(self._on_export_list)
         layout.addWidget(self.export_list_btn)
 
-        self._status_hint = QLabel("Shortcuts: ←→ Navigate | Space Toggle | Delete Confirm | 1-5 Keep")
-        self._status_hint.setStyleSheet(f"font-size: 10px; color: {theme_token('muted')}; margin-left: 20px;")
+        if hasattr(self, "_large_delete_btn") and self._large_delete_btn:
+            layout.addWidget(self._large_delete_btn)
+
+        self._status_hint = QLabel("←→ Navigate | Space Toggle | Del Confirm | 1-5 Keep")
+        self._status_hint.setStyleSheet(f"font-size: 10px; color: {theme_token('muted')}; margin-left: 12px;")
         layout.addWidget(self._status_hint)
 
+        return bar
+
+    def _build_post_delete_banner(self):
+        """Non-blocking banner: 'Deleted X files. [Refresh] [Rescan]' — hidden by default."""
+        bar = QFrame()
+        bar.setObjectName("PostDeleteBanner")
+        bar.setFixedHeight(44)
+        bar.setVisible(False)
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(16, 6, 16, 6)
+        layout.setSpacing(12)
+        self._post_delete_label = QLabel("")
+        self._post_delete_label.setStyleSheet("font-size: 12px; color: #94a3b8;")
+        layout.addWidget(self._post_delete_label)
+        layout.addStretch(1)
+        self._post_delete_refresh_btn = QPushButton("Refresh")
+        self._post_delete_refresh_btn.setToolTip("Reconcile list with filesystem (remove missing paths). No full scan.")
+        self._post_delete_refresh_btn.setCursor(Qt.PointingHandCursor)
+        self._post_delete_refresh_btn.clicked.connect(self._on_post_delete_refresh)
+        layout.addWidget(self._post_delete_refresh_btn)
+        self._post_delete_rescan_btn = QPushButton("Rescan")
+        self._post_delete_rescan_btn.setToolTip("Re-run scan with last config and replace results.")
+        self._post_delete_rescan_btn.setCursor(Qt.PointingHandCursor)
+        self._post_delete_rescan_btn.clicked.connect(self._on_post_delete_rescan)
+        layout.addWidget(self._post_delete_rescan_btn)
+        bar.setStyleSheet("""
+            QFrame#PostDeleteBanner {
+                background: rgba(0, 196, 180, 0.12);
+                border: 1px solid rgba(0, 196, 180, 0.35);
+                border-radius: 8px;
+            }
+            QPushButton { background: rgba(0, 196, 180, 0.25); color: #e7ecf2; border: none; border-radius: 6px; padding: 6px 12px; }
+            QPushButton:hover { background: rgba(0, 196, 180, 0.4); }
+        """)
         return bar
 
     def _setup_keyboard_shortcuts(self):
@@ -1292,10 +1319,14 @@ class ReviewPage(BaseStation):
 
     def _wire(self):
         self.file_table.itemChanged.connect(self._on_file_table_changed)
+        if hasattr(self._bus, "deletion_completed"):
+            self._bus.deletion_completed.connect(self._on_deletion_completed)
 
     @Slot(dict)
     def load_scan_result(self, result: dict):
         self._result = dict(result or {})
+        if hasattr(self, "_post_delete_banner") and self._post_delete_banner is not None:
+            self._post_delete_banner.setVisible(False)
         groups_raw = self._result.get("groups") or []
 
         self._all_groups = [extract_group_data(g, i) for i, g in enumerate(groups_raw)]
@@ -1313,16 +1344,17 @@ class ReviewPage(BaseStation):
         self._refresh_delete_button()
 
     def refresh_theme(self) -> None:
-        """Gemini 2 full theme refresh — scaffold, panels, FAB, floating delete."""
+        """Gemini 2 full theme refresh — scaffold, panels, FAB, floating delete, bottom bar."""
         super().refresh_theme()
         self.apply_theme()
         c = current_colors()
         panel = c.get("panel", "#151922")
+        line = c.get("line", "#2a3241")
         accent = c.get("accent", "#00C4B4")
         if hasattr(self, "left_panel") and self.left_panel:
-            self.left_panel.setStyleSheet(f"QFrame#LeftPanel {{ background: {panel}; border-radius: 12px; }}")
-        if hasattr(self, "right_panel") and self.right_panel:
-            self.right_panel.setStyleSheet(f"QFrame#RightPanel {{ background: {panel}; border-radius: 12px; }}")
+            self.left_panel.setStyleSheet(f"QFrame#LeftPanel {{ background: {panel}; border-radius: 12px; border-right: 1px solid {line}; }}")
+        if hasattr(self, "center_panel") and self.center_panel:
+            self.center_panel.setStyleSheet(f"QFrame#CenterPanel {{ background: {c.get('bg', '#0f1115')}; border-radius: 12px; }}")
         if hasattr(self, "smart_select_fab") and self.smart_select_fab:
             self.smart_select_fab.setStyleSheet(f"""
                 QPushButton#SmartSelectFAB {{ background: {accent}; color: white; border-radius: 12px; font-weight: bold; }}
@@ -1332,8 +1364,8 @@ class ReviewPage(BaseStation):
             self.floating_delete._apply_gemini_style()
         if hasattr(self, "_scaffold") and self._scaffold and hasattr(self._scaffold, "refresh_theme"):
             self._scaffold.refresh_theme()
-        if hasattr(self, "_sticky") and self._sticky and hasattr(self._sticky, "refresh_theme"):
-            self._sticky.refresh_theme()
+        if hasattr(self, "_bottom_bar") and self._bottom_bar:
+            self._bottom_bar.setStyleSheet(f"QFrame#StatusBar {{ background: {panel}; border-top: 1px solid {line}; border-radius: 0; }}")
         self.update()
         self.repaint()
 
@@ -1485,6 +1517,8 @@ class ReviewPage(BaseStation):
 
         if kept_path:
             self._update_preview(kept_path)
+        elif hasattr(self, "center_detail_line") and self.center_detail_line is not None:
+            self.center_detail_line.setText("")
 
         for i in range(self.group_list_layout.count()):
             item = self.group_list_layout.itemAt(i)
@@ -1520,31 +1554,19 @@ class ReviewPage(BaseStation):
             self.file_table.blockSignals(False)
 
     def _update_preview(self, file_path: str):
-        if is_image_file(file_path):
-            pix = QPixmap(file_path)
-            if not pix.isNull():
-                scaled = pix.scaled(240, 240, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                self.preview_label.setPixmap(scaled)
-                self.preview_label.setStyleSheet("")
-            else:
-                self.preview_label.setText("❌")
-                self.preview_label.setStyleSheet("font-size: 48px;")
-        else:
-            self.preview_label.setText(file_emoji(file_path))
-            self.preview_label.setStyleSheet("font-size: 64px;")
-
-        self.detail_name.setText(f"Name: {Path(file_path).name}")
-        self.detail_path.setText(f"Path: {truncate_text(file_path, 50)}")
-        self.detail_category.setText(f"Category: {get_file_category(file_path)}")
+        """Update center one-line detail (right panel removed)."""
+        if not hasattr(self, "center_detail_line") or self.center_detail_line is None:
+            return
         try:
             st = os.stat(file_path)
-            self.detail_size.setText(f"Size: {format_bytes(st.st_size)}")
+            size_str = format_bytes(st.st_size)
             import datetime
             mtime = datetime.datetime.fromtimestamp(st.st_mtime)
-            self.detail_modified.setText(f"Modified: {mtime.strftime('%Y-%m-%d %H:%M')}")
-        except:
-            self.detail_size.setText("Size: -")
-            self.detail_modified.setText("Modified: -")
+            mod_str = mtime.strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            size_str = "-"
+            mod_str = "-"
+        self.center_detail_line.setText(f"{Path(file_path).name}  •  {size_str}  •  {mod_str}")
 
     def _compute_delete_count(self):
         """Single source of truth: count paths marked for delete from _keep_states + _filtered_groups."""
@@ -1643,7 +1665,7 @@ class ReviewPage(BaseStation):
             self._large_delete_btn.setEnabled(delete_count > 0)
         safe_count = total_files - delete_count
         if hasattr(self, "smart_select_fab"):
-            self.smart_select_fab.setText(f"Smart Select\n{safe_count} safe")
+            self.smart_select_fab.setText(f"Smart Select • {safe_count} safe")
 
     def _chunked_size_next(self):
         if not self._pending_size_paths:
@@ -1978,12 +2000,85 @@ class ReviewPage(BaseStation):
     def _on_cleanup_cancelled(self):
         self._bus.notify("Cleanup Cancelled", "File deletion was cancelled", 2000)
 
-    def refresh_after_deletion(self, deleted_paths: list) -> None:
-        """Remove deleted paths from UI models and refresh. Called by MainWindow after cleanup."""
+    @Slot(dict)
+    def _on_deletion_completed(self, payload: dict) -> None:
+        """Single handler for deletion success: refresh UI and show post-delete banner."""
+        deleted_paths = list(payload.get("deleted_paths") or [])
+        scan_id = str(payload.get("scan_id") or "")
+        deleted_count = int(payload.get("deleted_count") or len(deleted_paths))
         if not deleted_paths:
             return
-        deleted_set = {os.path.normpath(os.path.normcase(str(p))) for p in deleted_paths}
-        log_info(f"[Delete] refresh_after_deletion: {len(deleted_set)} paths removed from UI")
+        groups_before = len(self._all_groups)
+        items_before = sum(len(g.paths) for g in self._all_groups)
+        log_info(f"[Delete] before refresh_after_deletion: groups={groups_before} items={items_before}")
+        self.refresh_after_deletion(deleted_paths)
+        groups_after = len(self._all_groups)
+        items_after = sum(len(g.paths) for g in self._all_groups)
+        log_info(f"[Delete] after refresh_after_deletion: groups={groups_after} items={items_after}")
+        self._show_post_delete_banner(deleted_count)
+
+    def _show_post_delete_banner(self, deleted_count: int) -> None:
+        """Show 'Deleted X files. [Refresh] [Rescan]' banner."""
+        if hasattr(self, "_post_delete_banner") and self._post_delete_banner is not None:
+            self._post_delete_label.setText(f"Deleted {deleted_count} file(s).")
+            self._post_delete_banner.setVisible(True)
+
+    def _on_post_delete_refresh(self) -> None:
+        """Reconcile current review dataset with filesystem (remove non-existent paths). No full scan."""
+        log_info("[Delete] Post-delete Refresh triggered")
+        self._reconcile_with_filesystem()
+
+    def _on_post_delete_rescan(self) -> None:
+        """Re-run scan with last config/locations and replace results."""
+        log_info("[Delete] Post-delete Rescan triggered")
+        if hasattr(self, "_post_delete_banner") and self._post_delete_banner is not None:
+            self._post_delete_banner.setVisible(False)
+        root = (self._result or {}).get("root") or ((self._result or {}).get("metadata") or {}).get("root") or ""
+        if not root or not os.path.isdir(root):
+            self._bus.notify("Rescan skipped", "No previous scan root. Run a scan first.", 3000)
+            return
+        options = self._bus.get_scan_options() or {}
+        config = dict(options, root=root, fast_mode=True, mode="fast")
+        config.setdefault("media_type", "all")
+        config.setdefault("engine", "simple")
+        if hasattr(self._bus, "scan_requested"):
+            self._bus.scan_requested.emit(config)
+
+    def _reconcile_with_filesystem(self) -> None:
+        """Remove paths that no longer exist from _all_groups; drop empty groups; refresh view."""
+        new_all_groups: List[GroupData] = []
+        for g in self._all_groups:
+            remaining = [p for p in g.paths if os.path.exists(str(p))]
+            if len(remaining) >= 2:
+                try:
+                    rec = sum(os.path.getsize(p) for p in remaining if os.path.exists(p))
+                except Exception:
+                    rec = 0
+                new_all_groups.append(GroupData(
+                    paths=remaining,
+                    hint=g.hint,
+                    recoverable_bytes=rec,
+                    similarity=g.similarity,
+                    group_id=len(new_all_groups),
+                ))
+        self._all_groups = new_all_groups
+        self._keep_states.clear()
+        for g in self._all_groups:
+            self._keep_states[g.group_id] = {_norm_path(p): True for p in g.paths}
+        self._apply_filter()
+        self._current_group_idx = 0 if self._filtered_groups else -1
+        self._populate_group_list()
+        self._update_display()
+        self._update_stats()
+        self._refresh_delete_button()
+        if hasattr(self, "_post_delete_banner") and self._post_delete_banner is not None:
+            self._post_delete_banner.setVisible(False)
+
+    def refresh_after_deletion(self, deleted_paths: list) -> None:
+        """Remove deleted paths from UI models and refresh. Single _norm_path for consistency."""
+        if not deleted_paths:
+            return
+        deleted_set = {_norm_path(str(p)) for p in deleted_paths}
 
         new_all_groups: List[GroupData] = []
         for g in self._all_groups:
@@ -2008,6 +2103,10 @@ class ReviewPage(BaseStation):
         self._apply_filter()
         self._current_group_idx = 0 if self._filtered_groups else -1
         self._populate_group_list()
+        # Clear selection for deleted items (table and list)
+        if hasattr(self, "file_table") and self.file_table:
+            self.file_table.clearSelection()
+            self.file_table.setCurrentCell(-1, -1)
         self._update_display()
         self._update_stats()
         self._refresh_delete_button()
@@ -2036,10 +2135,6 @@ class ReviewPage(BaseStation):
             }}
             QFrame#CenterPanel {{
                 background: {bg};
-            }}
-            QFrame#RightPanel {{
-                background: {panel};
-                border-left: 1px solid {line};
             }}
             QFrame#StatusBar {{
                 background: {surface};
@@ -2106,6 +2201,23 @@ class ReviewPage(BaseStation):
                 border: none;
                 background: transparent;
             }}
+            QPushButton#NavArrowBtn {{
+                background: rgba(0,196,180,0.15);
+                color: {accent};
+                border: 1px solid rgba(0,196,180,0.4);
+                border-radius: 8px;
+            }}
+            QPushButton#NavArrowBtn:hover {{
+                background: rgba(0,196,180,0.25);
+            }}
+            QPushButton#GroupsToggle {{
+                background: {panel};
+                color: {text};
+                border: 1px solid {line};
+                border-radius: 8px;
+                padding: 6px;
+            }}
+            QPushButton#GroupsToggle:hover {{ border-color: {accent}; }}
         """)
 
         if hasattr(self, '_large_delete_btn') and self._large_delete_btn:
