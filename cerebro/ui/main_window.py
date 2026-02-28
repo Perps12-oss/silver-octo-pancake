@@ -22,9 +22,11 @@ from typing import Dict, Any, Optional, List
 from pathlib import Path
 
 from PySide6.QtCore import QTimer, Qt, QThread, Signal, Slot
+from PySide6.QtGui import QKeySequence, QShortcut, QAction
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget,
-    QMessageBox, QFrame, QLabel, QPushButton, QComboBox
+    QMessageBox, QFrame, QLabel, QPushButton, QComboBox, QMenuBar, QMenu,
+    QDialog, QDialogButtonBox
 )
 
 from cerebro.services.logger import log_info, log_error, log_debug
@@ -143,7 +145,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setObjectName("MainWindow")
-        self.setWindowTitle("CEREBRO v5.0")
+        self.setWindowTitle("Cerebro — Gemini Duplicate Finder")
         
         # Enable window resizing and standard controls (minimize, maximize, close)
         self.setWindowFlags(
@@ -187,6 +189,8 @@ class MainWindow(QMainWindow):
         self._build_pages()
         self._wire_bus()
         self._wire_theme()
+        self._setup_shortcuts()
+        self._setup_help_menu()
 
         # Apply theme and propagate to all pages
         self._theme.apply_theme(self._theme.current_theme_key)
@@ -222,12 +226,12 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # Global top toolbar (Gemini-style)
+        # Global top toolbar (Gemini-style): 24px margins, clean elevated bar
         self._toolbar = QFrame()
         self._toolbar.setObjectName("GlobalToolbar")
         self._toolbar.setFixedHeight(48)
         tb_layout = QHBoxLayout(self._toolbar)
-        tb_layout.setContentsMargins(12, 6, 12, 6)
+        tb_layout.setContentsMargins(24, 6, 24, 6)
         tb_layout.setSpacing(12)
         self._scanner_mode_combo = QComboBox()
         self._scanner_mode_combo.setToolTip("Scanner mode: Turbo (12x), Ultra (60x), or Quantum (180x+)")
@@ -239,6 +243,21 @@ class MainWindow(QMainWindow):
         self._scanner_mode_combo.currentIndexChanged.connect(self._on_toolbar_scanner_mode_changed)
         tb_layout.addWidget(QLabel("Scanner:"))
         tb_layout.addWidget(self._scanner_mode_combo)
+        self._scanner_badge = QLabel("Turbo")
+        self._scanner_badge.setObjectName("ScannerBadge")
+        self._scanner_badge.setStyleSheet("""
+            QLabel#ScannerBadge {
+                background: #22c55e;
+                color: white;
+                border-radius: 10px;
+                padding: 2px 8px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+        """)
+        self._scanner_badge.setToolTip("Turbo = green, Ultra = blue, Quantum = purple")
+        tb_layout.addWidget(self._scanner_badge)
+        self._on_toolbar_scanner_mode_changed(self._scanner_mode_combo.currentIndex())
         tb_layout.addSpacing(16)
         new_scan_btn = QPushButton("New Scan")
         new_scan_btn.setToolTip("Start a new duplicate scan")
@@ -297,13 +316,7 @@ class MainWindow(QMainWindow):
             self._theme_toggle_btn.setText("Theme: Light")
 
         self.setStyleSheet(f"""
-            QMainWindow {{
-                background-color: {bg};
-            }}
-            QWidget#rootWidget {{
-                background-color: {bg};
-            }}
-            QWidget#MainWindow {{
+            QMainWindow, QWidget#rootWidget, QWidget#MainWindow {{
                 background-color: {bg};
             }}
             QFrame#GlobalToolbar {{
@@ -315,11 +328,11 @@ class MainWindow(QMainWindow):
                 font-family: "Segoe UI", sans-serif;
             }}
             QFrame#GlobalToolbar QPushButton {{
-                border-radius: 8px;
-                padding: 6px 12px;
+                border-radius: 12px;
+                padding: 8px 16px;
             }}
             QFrame#GlobalToolbar QPushButton:hover {{
-                background-color: {accent};
+                background-color: rgba(0,196,180,0.3);
                 color: #0f1115;
             }}
             QFrame#ScanBanner {{
@@ -370,22 +383,51 @@ class MainWindow(QMainWindow):
         """Handle theme changes."""
         log_info(f"[UI] Theme changed: {theme_key}")
 
-        # Update root styling
+        # Update root styling and content area background
         self._apply_root_theme()
 
-        # Propagate to all pages
+        # Force central content area to use theme bg
+        self._refresh_content_area_theme()
+
+        # Refresh every page in the stack so content/cards/panels update
+        self._refresh_all_pages_theme()
+
+        # Propagate to stack and navigator
         self._force_theme_refresh()
 
-        # Notify current page specifically
+        # Notify current page again so it repaints
         current = self._page_stack.currentWidget()
         if current and hasattr(current, 'refresh_theme'):
             current.refresh_theme()
         if current and hasattr(current, 'on_theme_changed'):
             current.on_theme_changed()
 
+    def _refresh_content_area_theme(self) -> None:
+        """Apply theme background to central widget and page stack."""
+        colors = current_colors()
+        bg = colors.get('bg', '#0f1115')
+        self._page_stack.setStyleSheet(f"QStackedWidget#pageStack {{ background: {bg}; }}")
+        cw = self.centralWidget()
+        if cw:
+            cw.setStyleSheet(f"QWidget#rootWidget {{ background: {bg}; }}")
+
+    def _refresh_all_pages_theme(self) -> None:
+        """Iterate all pages and call refresh_theme() so content/cards/panels update."""
+        for page in self._pages.values():
+            if hasattr(page, 'refresh_theme') and callable(page.refresh_theme):
+                try:
+                    page.refresh_theme()
+                except Exception as e:
+                    log_error(f"[UI] refresh_theme failed on {type(page).__name__}: {e}")
+            if hasattr(page, 'on_theme_changed') and callable(page.on_theme_changed):
+                try:
+                    page.on_theme_changed()
+                except Exception as e:
+                    log_error(f"[UI] on_theme_changed failed on {type(page).__name__}: {e}")
+
     def _force_theme_refresh(self) -> None:
         """Force theme refresh across all components."""
-        # Update page stack
+        # Update page stack propagation
         self._page_stack.propagate_theme()
 
         # Update navigator
@@ -401,13 +443,28 @@ class MainWindow(QMainWindow):
             """)
 
     def _on_toolbar_scanner_mode_changed(self, index: int) -> None:
-        """Persist scanner mode to bus so Scan page can sync."""
+        """Persist scanner mode to bus and update colored badge."""
         try:
             opts = self._bus.get_scan_options() or {}
             opts["scanner_tier"] = ("turbo", "ultra", "quantum")[min(index, 2)]
             self._bus.set_scan_options(opts)
         except Exception:
             pass
+        if hasattr(self, "_scanner_badge"):
+            labels = ["Turbo", "Ultra", "Quantum"]
+            colors = ["#22c55e", "#3b82f6", "#a855f7"]
+            idx = min(index, 2)
+            self._scanner_badge.setText(labels[idx])
+            self._scanner_badge.setStyleSheet(f"""
+                QLabel#ScannerBadge {{
+                    background: {colors[idx]};
+                    color: white;
+                    border-radius: 10px;
+                    padding: 2px 8px;
+                    font-size: 11px;
+                    font-weight: bold;
+                }}
+            """)
 
     def _on_toolbar_theme_toggle(self) -> None:
         """Toggle between Gemini dark and light."""
@@ -417,6 +474,63 @@ class MainWindow(QMainWindow):
         else:
             self._theme.apply_theme("gemini_light")
             self._theme_toggle_btn.setText("Theme: Dark")
+
+    def _setup_shortcuts(self) -> None:
+        """Global keyboard shortcuts."""
+        QShortcut(QKeySequence("Ctrl+N"), self).activated.connect(lambda: self.navigate_to("scan"))
+        QShortcut(QKeySequence("F5"), self).activated.connect(self._on_f5_refresh)
+        QShortcut(QKeySequence("Ctrl+S"), self).activated.connect(self._on_ctrl_s_smart_select)
+        QShortcut(QKeySequence("Delete"), self).activated.connect(self._on_delete_key)
+
+    def _on_f5_refresh(self) -> None:
+        current = self._page_stack.currentWidget()
+        if hasattr(current, "refresh"):
+            current.refresh()
+        elif hasattr(current, "on_enter"):
+            current.on_enter()
+
+    def _on_ctrl_s_smart_select(self) -> None:
+        current = self._page_stack.currentWidget()
+        if hasattr(current, "focus_smart_select") and callable(getattr(current, "focus_smart_select")):
+            current.focus_smart_select()
+        elif self._page_stack.currentWidget() == self._pages.get("review"):
+            self.navigate_to("review")
+
+    def _on_delete_key(self) -> None:
+        current = self._page_stack.currentWidget()
+        if hasattr(current, "confirm_delete_selected") and callable(getattr(current, "confirm_delete_selected")):
+            current.confirm_delete_selected()
+
+    def _setup_help_menu(self) -> None:
+        """Help menu with About."""
+        menubar = QMenuBar(self)
+        help_menu = menubar.addMenu("Help")
+        about_act = QAction("About", self)
+        about_act.triggered.connect(self._show_about)
+        help_menu.addAction(about_act)
+        self.setMenuBar(menubar)
+
+    def _show_about(self) -> None:
+        from PySide6.QtWidgets import QApplication
+        ver_str = QApplication.applicationVersion() or "5.0.0"
+        d = QDialog(self)
+        d.setWindowTitle("About Cerebro")
+        layout = QVBoxLayout(d)
+        layout.setSpacing(16)
+        layout.setContentsMargins(24, 24, 24, 24)
+        title = QLabel("Cerebro — Gemini Duplicate Finder")
+        title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        layout.addWidget(title)
+        ver = QLabel(f"Version {ver_str}")
+        layout.addWidget(ver)
+        engines = QLabel("Powered by Turbo / Ultra / Quantum scan engines.")
+        engines.setWordWrap(True)
+        engines.setStyleSheet("color: #888;")
+        layout.addWidget(engines)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        bb.accepted.connect(d.accept)
+        layout.addWidget(bb)
+        d.exec()
 
     def navigate_to(self, station_id: str) -> None:
         """Navigate to a station without gating."""
@@ -520,6 +634,16 @@ class MainWindow(QMainWindow):
         except Exception as e:
             log_error(f"[UI] History ingest failed: {e}")
 
+        # Add scan root to Start page Locations (persistent)
+        try:
+            root_path = (result or {}).get("root") or (result or {}).get("root_path") or ((result or {}).get("metadata") or {}).get("root")
+            if root_path and isinstance(root_path, str):
+                start = self._pages.get("mission")
+                if hasattr(start, "add_location"):
+                    start.add_location(root_path)
+        except Exception:
+            pass
+
     def _on_scan_failed(self, err: str) -> None:
         """Handle scan failure."""
         self._toast.show_toast("Scan failed ❌", str(err or "Unknown error"), duration_ms=3200)
@@ -605,6 +729,12 @@ class MainWindow(QMainWindow):
         Pipeline owns validation, execution, and audit write-through.
         """
         try:
+            # Coerce payload (Signal(object) may pass non-dict in some Qt versions)
+            if payload is None or not isinstance(payload, dict):
+                payload = getattr(payload, "__dict__", None) or {}
+            if not payload or not (payload.get("groups")):
+                self._toast.show_toast("Nothing to delete", "No files marked for deletion.", duration_ms=2200)
+                return
             # Normalize and validate payload shape (no guessing)
             deletion_plan = self._normalize_deletion_plan(payload)
 

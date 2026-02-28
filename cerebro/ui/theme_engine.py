@@ -208,7 +208,21 @@ def _base_qss(theme: ThemeSpec) -> str:
     }}
 
     QWidget {{
+        color: {text};
+    }}
+
+    QStackedWidget, QWidget#pageStack {{
+        background: {bg};
+        color: {text};
+    }}
+
+    QFrame {{
+        color: {text};
+    }}
+
+    QLabel {{
         background: transparent;
+        color: {text};
     }}
 
     QToolTip {{
@@ -501,6 +515,7 @@ def _base_qss(theme: ThemeSpec) -> str:
         margin-top: 12px;
         padding-top: 12px;
         font-weight: 600;
+        color: {text};
     }}
     
     QGroupBox::title {{
@@ -508,6 +523,16 @@ def _base_qss(theme: ThemeSpec) -> str:
         left: 12px;
         padding: 0 8px;
         color: {accent};
+    }}
+
+    /* Splitter */
+    QSplitter::handle {{
+        background: {line};
+        width: 4px;
+        height: 4px;
+    }}
+    QSplitter::handle:hover {{
+        background: {accent};
     }}
 
     /* Checkboxes and Radio buttons */
@@ -1155,12 +1180,3 @@ __all__ = [
     'get_theme_manager', 'reset_theme_manager', 'current_colors', 'apply_theme',
     '_interpolate_color', '_adjust_brightness', '_hex_to_rgb', '_rgb_to_hex'
 ]
-
-class ThemeMixin:
-    """Backward-compatible theme helper used by older pages.
-
-    New UI should prefer ThemeEngine directly, but this keeps legacy imports stable.
-    """
-
-    def theme_colors(self) -> Dict:
-        return GEMINI_PALETTE.get("dark" if getattr(self, "_theme_mode", "light") == "dark" else "light", GEMINI_PALETTE["light"])

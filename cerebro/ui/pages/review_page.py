@@ -1,20 +1,12 @@
 # cerebro/ui/pages/review_page.py
 """
-CEREBRO v5.0 — Review Page (PySide6) — POLISHED MERGED DESIGN
-
-Enhanced with:
-✓ Smart logic applies to ALL groups (filtered or all)
-✓ Media type filtering actually filters displayed groups  
-✓ Smart select respects current filter context
-✓ Always-visible floating Delete button (prominent, responsive)
-✓ Full keyboard navigation (arrows, space, delete, 1-5)
-✓ Centered modal progress dialog (blocks interaction, colorful)
-✓ Selection semantics: checked = delete, unchecked = keep
-✓ Enforced invariant: exactly ONE keep per group minimum
+CEREBRO — Review Page (Gemini 2 Edition)
+Exact MacPaw Gemini 2 look & feel on Windows + all original powerful features preserved.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass
 from enum import Enum, IntEnum
@@ -26,7 +18,7 @@ from PySide6.QtCore import QItemSelectionModel
 from PySide6.QtCore import (
     Qt, QSize, QRect, QPoint, QEvent, QTimer, Signal, Slot,
     QRunnable, QThreadPool, QObject, QMutex, QMutexLocker,
-    QPropertyAnimation, QEasingCurve
+    QPropertyAnimation, QEasingCurve, QThread
 )
 from PySide6.QtGui import (
     QPixmap, QKeySequence, QShortcut, QKeyEvent, QFontMetrics,
@@ -37,14 +29,16 @@ from PySide6.QtWidgets import (
     QLabel, QPushButton, QFrame, QScrollArea, QSplitter,
     QComboBox, QCheckBox, QDialog, QListWidget, QListWidgetItem,
     QStackedWidget, QSizePolicy, QTableWidget, QTableWidgetItem,
-    QHeaderView, QAbstractItemView, QMessageBox, QInputDialog,
+    QHeaderView, QAbstractItemView, QMessageBox, QInputDialog, QFileDialog,
     QProgressBar, QTextEdit, QGroupBox, QToolButton,
     QGraphicsDropShadowEffect, QApplication
 )
 
+from cerebro.ui.components.modern import ContentCard, PageScaffold, StickyActionBar
+from cerebro.ui.components.modern._tokens import token as theme_token
 from cerebro.ui.pages.base_station import BaseStation
 from cerebro.ui.state_bus import get_state_bus
-from cerebro.ui.theme_engine import get_theme_manager
+from cerebro.ui.theme_engine import get_theme_manager, current_colors
 
 
 # ==============================================================================
@@ -72,6 +66,11 @@ ALL_MEDIA_TYPES = {
 # ==============================================================================
 # UTILS
 # ==============================================================================
+
+def _norm_path(p: Optional[str]) -> str:
+    """Normalize path for use as keep_map key so lookups work across filter changes."""
+    return os.path.normpath(os.path.normcase(str(p or "")))
+
 
 def get_file_category(path: str) -> str:
     ext = Path(path).suffix.lower()
@@ -129,9 +128,10 @@ def file_emoji(path: str) -> str:
 class ThemeHelper:
     @staticmethod
     def colors() -> Dict[str, str]:
+        """Return current theme colors (always from theme manager, so light/dark persists)."""
         try:
-            tm = get_theme_manager()
-            return tm.current_colors() if tm else {}
+            from cerebro.ui.theme_engine import current_colors
+            return current_colors()
         except Exception:
             return {}
 
@@ -160,10 +160,31 @@ class _ThumbTask(QRunnable):
         if not is_image_file(self.file_path):
             return
         try:
+            w, h = int(self.size.width()), int(self.size.height())
+            thumb_dir = None
+            thumb_path = None
+            try:
+                from cerebro.services.cache_manager import get_cache_manager
+                thumb_dir = Path(get_cache_manager().cache_dir) / "thumbnails"
+                cache_key = hashlib.sha256(f"{self.file_path}_{w}_{h}".encode()).hexdigest()[:20]
+                thumb_path = thumb_dir / f"{cache_key}.png"
+                if thumb_path.exists():
+                    pix = QPixmap(str(thumb_path))
+                    if not pix.isNull():
+                        self.signals.finished.emit(self.file_path, pix)
+                        return
+            except Exception:
+                pass
             pix = QPixmap(self.file_path)
             if pix.isNull():
                 return
             scaled = pix.scaled(self.size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            if thumb_dir is not None and thumb_path is not None:
+                try:
+                    thumb_dir.mkdir(parents=True, exist_ok=True)
+                    scaled.save(str(thumb_path), "PNG")
+                except Exception:
+                    pass
             self.signals.finished.emit(self.file_path, scaled)
         except Exception:
             return
@@ -337,31 +358,28 @@ class CleanupProgressDialog(QDialog):
         self.accept()
 
     def apply_theme(self):
-        c = ThemeHelper.colors()
-        bg = c.get('panel', '#1a1d26')
-        text = c.get('text', '#e7ecf2')
-        accent = c.get('accent', '#3b82f6')
-
+        """Gemini-styled progress dialog: panel bg, accent border and buttons."""
+        from cerebro.ui.theme_engine import current_colors
+        c = current_colors()
+        panel = c.get("panel", "#1a1d26")
+        text = c.get("text", "#e7ecf2")
+        accent = c.get("accent", "#00C4B4")
         self.setStyleSheet(f"""
-            CleanupProgressDialog {{
-                background: {bg};
+            QDialog {{
+                background: {panel};
                 border: 3px solid {accent};
                 border-radius: 20px;
             }}
-            QLabel {{
-                color: {text};
-            }}
+            QLabel {{ color: {text}; }}
+            QProgressBar::chunk {{ background: {accent}; }}
             QPushButton {{
                 background: {accent};
                 color: white;
-                border: none;
-                border-radius: 8px;
+                border-radius: 12px;
                 font-weight: bold;
                 font-size: 14px;
             }}
-            QPushButton:hover {{
-                background: {accent};
-            }}
+            QPushButton:hover {{ background: {accent}; }}
         """)
 
     def keyPressEvent(self, event: QKeyEvent):
@@ -387,7 +405,7 @@ class FloatingDeleteButton(QPushButton):
         self.setFixedSize(180, 60)
         self.setCursor(Qt.PointingHandCursor)
         self.update_display()
-        self._apply_style()
+        self._apply_gemini_style()
         self._pulse_anim = QPropertyAnimation(self, b"geometry")
         self._pulse_anim.setDuration(200)
 
@@ -414,32 +432,40 @@ class FloatingDeleteButton(QPushButton):
         self._pulse_anim.start()
         QTimer.singleShot(200, lambda: self._pulse_anim.setEndValue(current))
 
-    def _apply_style(self):
-        self.setStyleSheet("""
-            FloatingDeleteButton {
+    def _apply_gemini_style(self):
+        """Gemini 2: red delete button with teal accent border."""
+        from cerebro.ui.theme_engine import current_colors
+        c = current_colors()
+        accent = c.get("accent", "#00C4B4")
+        self.setStyleSheet(f"""
+            FloatingDeleteButton {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 #ef4444, stop:1 #dc2626);
                 color: white;
-                border: 3px solid #fca5a5;
+                border: 3px solid {accent};
                 border-radius: 30px;
                 font-weight: bold;
                 font-size: 13px;
                 padding: 8px;
-            }
-            FloatingDeleteButton:hover {
+            }}
+            FloatingDeleteButton:hover {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 #f87171, stop:1 #ef4444);
-                border-color: #fecaca;
-            }
-            FloatingDeleteButton:disabled {
+                border-color: {accent};
+            }}
+            FloatingDeleteButton:disabled {{
                 background: #4b5563;
                 border-color: #6b7280;
                 color: #9ca3af;
-            }
-            FloatingDeleteButton:pressed {
+            }}
+            FloatingDeleteButton:pressed {{
                 background: #b91c1c;
-            }
+            }}
         """)
+
+    def _apply_style(self):
+        """Alias for theme refresh."""
+        self._apply_gemini_style()
 
     def mousePressEvent(self, event):
         if self.isEnabled():
@@ -472,17 +498,30 @@ class GroupData:
             return "Other"
         return get_file_category(self.paths[0])
 
+def _compute_group_size(paths: List[str]) -> int:
+    total = 0
+    for p in paths:
+        try:
+            total += os.path.getsize(p)
+        except Exception:
+            pass
+    return total
+
+
 def extract_group_data(group: Any, idx: int = 0) -> GroupData:
     if isinstance(group, dict):
         raw_paths = group.get("paths") or group.get("files") or group.get("items") or []
         paths = [str(p) for p in raw_paths]
         hint = str(group.get("reason") or group.get("hint") or group.get("description") or "")
         recoverable = int(group.get("recoverable_bytes", group.get("recoverable", 0)) or 0)
+        if recoverable == 0 and paths:
+            recoverable = _compute_group_size(paths)
         similarity = float(group.get("similarity", 100.0) or 100.0)
-        return GroupData(paths=paths, hint=hint, recoverable_bytes=recoverable, 
+        return GroupData(paths=paths, hint=hint, recoverable_bytes=recoverable,
                         similarity=similarity, group_id=idx)
     if isinstance(group, (list, tuple)):
-        return GroupData(paths=[str(p) for p in group], group_id=idx)
+        paths = [str(p) for p in group]
+        return GroupData(paths=paths, group_id=idx, recoverable_bytes=_compute_group_size(paths) if paths else 0)
     return GroupData(paths=[], group_id=idx)
 
 
@@ -572,7 +611,7 @@ class DualPaneComparison(QFrame):
             self.right_info = info
 
         btn_row = QHBoxLayout()
-        keep_btn = QPushButton(f"✓ Keep {label_text}")
+        keep_btn = QPushButton(f"✔ Keep {label_text}")
         keep_btn.setObjectName(f"keep_{label_text}")
         keep_btn.setCursor(Qt.PointingHandCursor)
         keep_btn.clicked.connect(lambda: self._on_keep_clicked(label_text))
@@ -580,8 +619,36 @@ class DualPaneComparison(QFrame):
         btn_row.addWidget(keep_btn)
         btn_row.addStretch()
         layout.addLayout(btn_row)
+        if label_text == "Original":
+            self.left_keep_btn = keep_btn
+        else:
+            self.right_keep_btn = keep_btn
 
         return pane
+
+    def set_kept_path(self, kept_path: Optional[str]) -> None:
+        """Highlight only the Keep button for the given path; unhighlight the other."""
+        try:
+            kept_norm = os.path.normpath(os.path.normcase(str(kept_path or "")))
+            highlight = "background: #3b82f6; color: white; font-weight: bold; border-radius: 8px; padding: 8px;"
+            neutral = "background: transparent; color: #94a3b8; border: 1px solid #475569; border-radius: 8px; padding: 8px;"
+            if len(self._current_paths) >= 1 and os.path.normpath(os.path.normcase(self._current_paths[0])) == kept_norm:
+                self.left_keep_btn.setStyleSheet(highlight)
+                if len(self._current_paths) >= 2:
+                    self.right_keep_btn.setStyleSheet(neutral)
+            elif len(self._current_paths) >= 2 and os.path.normpath(os.path.normcase(self._current_paths[1])) == kept_norm:
+                self.right_keep_btn.setStyleSheet(highlight)
+                self.left_keep_btn.setStyleSheet(neutral)
+            else:
+                self.left_keep_btn.setStyleSheet(neutral)
+                if len(self._current_paths) >= 2:
+                    self.right_keep_btn.setStyleSheet(neutral)
+        except Exception:
+            pass
+
+    def set_compare_mode(self, on: bool) -> None:
+        """Toggle side-by-side compare visibility (already dual-pane)."""
+        self.setVisible(True)
 
     def _on_keep_clicked(self, pane: str):
         if pane == "Original" and self._current_paths:
@@ -649,7 +716,10 @@ class GroupListItem(QFrame):
         layout.setSpacing(12)
 
         self.checkbox = QCheckBox()
-        self.checkbox.setToolTip("Check to mark ALL files in this group for deletion")
+        self.checkbox.setTristate(True)
+        self.checkbox.setToolTip(
+            "Unchecked: keep all • Checked: mark all for deletion (keep one) • Partially checked: mixed"
+        )
         self.checkbox.stateChanged.connect(self._on_checkbox_changed)
         layout.addWidget(self.checkbox)
 
@@ -672,6 +742,18 @@ class GroupListItem(QFrame):
         info.addWidget(details)
         layout.addLayout(info, 1)
 
+        gate_badge = QLabel("Safe")
+        gate_badge.setToolTip("Deletion Gate — Safe: keeps at least one copy.")
+        gate_badge.setStyleSheet("""
+            background: rgba(0,196,180,0.25);
+            color: #00C4B4;
+            border-radius: 8px;
+            padding: 2px 6px;
+            font-size: 10px;
+            font-weight: bold;
+        """)
+        layout.addWidget(gate_badge)
+
         if self.group_data.similarity < 100:
             sim = QLabel(f"{self.group_data.similarity:.0f}%")
             sim.setAlignment(Qt.AlignCenter)
@@ -687,27 +769,34 @@ class GroupListItem(QFrame):
             layout.addWidget(sim)
 
     def _on_checkbox_changed(self, state):
-        self.checkbox_changed.emit(self.group_id, state == Qt.Checked)
+        if state == Qt.PartiallyChecked:
+            self.checkbox.blockSignals(True)
+            self.checkbox.setCheckState(Qt.Checked)
+            self.checkbox.blockSignals(False)
+            self.checkbox_changed.emit(self.group_id, True)
+        else:
+            self.checkbox_changed.emit(self.group_id, state == Qt.Checked)
 
     def set_selected(self, selected: bool):
         self._selected = selected
         self.update_style()
 
     def update_style(self):
+        """Gemini 2 card style: panel background, border."""
         c = ThemeHelper.colors()
         if self._selected:
-            bg = c.get('accent', '#3b82f6')
-            border = c.get('accent', '#3b82f6')
+            bg = c.get("accent", "#00C4B4")
+            border = c.get("accent", "#00C4B4")
             text = "white"
         else:
-            bg = c.get('surface', '#151922')
-            border = c.get('line', '#2a3241')
-            text = c.get('text', '#e7ecf2')
+            bg = c.get("panel", c.get("surface", "#151922"))
+            border = c.get("border", c.get("line", "#2a3241"))
+            text = c.get("text", "#e7ecf2")
 
         self.setStyleSheet(f"""
             QFrame#GroupListItem {{
                 background: {bg};
-                border: 2px solid {border};
+                border: 1px solid {border};
                 border-radius: 12px;
             }}
             QLabel {{
@@ -721,14 +810,59 @@ class GroupListItem(QFrame):
 
 
 # ==============================================================================
+# SMART SELECT WORKER (runs off main thread to avoid UI freeze on 500k+ files)
+# ==============================================================================
+
+class SmartSelectWorker(QThread):
+    """Computes keep/delete per group in background; emits result for main thread to apply."""
+    finished_result = Signal(object)  # group_id -> {path: bool}; use object to avoid Shiboken dict copy-convert
+
+    def __init__(self, groups_data: List[tuple], criteria: str, parent=None):
+        super().__init__(parent)
+        self._groups_data = groups_data  # list of (group_id, paths)
+        self._criteria = criteria
+
+    def run(self):
+        result = {}
+        for group_id, paths in self._groups_data:
+            if not paths:
+                continue
+            try:
+                if self._criteria == "first":
+                    keeper = paths[0]
+                elif self._criteria == "oldest":
+                    keeper = min(paths, key=lambda p: os.path.getmtime(p))
+                elif self._criteria == "newest":
+                    keeper = max(paths, key=lambda p: os.path.getmtime(p))
+                elif self._criteria == "largest":
+                    keeper = max(paths, key=lambda p: os.path.getsize(p))
+                elif self._criteria == "smallest":
+                    keeper = min(paths, key=lambda p: os.path.getsize(p))
+                else:
+                    continue
+                result[group_id] = {p: (p == keeper) for p in paths}
+            except Exception:
+                continue
+        self.finished_result.emit(result)
+
+
+# Max group list widgets to create (avoids freeze with 100k+ groups)
+MAX_GROUP_LIST_ITEMS = 500
+
+# Chunk size for lazy delete_size calculation
+STATS_SIZE_CHUNK = 250
+
+
+# ==============================================================================
 # MAIN REVIEW PAGE
 # ==============================================================================
 
 class ReviewPage(BaseStation):
-    cleanup_confirmed = Signal(dict)
+    cleanup_confirmed = Signal(object)  # DeletionPlan dict; use object to avoid Shiboken dict copy-convert
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("ReviewPage")
         self._result = {}
         self._bus = get_state_bus()
 
@@ -739,57 +873,134 @@ class ReviewPage(BaseStation):
 
         self._current_filter = "All Files"
         self._progress_dialog = None
+        self._smart_select_worker = None
+        self._size_calc_timer = None
+        self._pending_size_paths = []
+        self._batch_updating = False
 
         self._thumb_loader = AsyncThumbnailLoader(self)
 
-        self._build()
+        self._build_gemini_ui()
         self._setup_keyboard_shortcuts()
         self._wire()
         self.apply_theme()
 
-    def _build(self):
+    def _build_gemini_ui(self):
+        """Gemini 2 layout: PageScaffold + ContentCard + StickyActionBar."""
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # Step bar
+        self._scaffold = PageScaffold(self, show_sidebar=False, show_sticky_action=True)
         self.step_bar = self._build_step_bar()
-        root.addWidget(self.step_bar)
+        self._scaffold.set_header(self.step_bar)
 
-        # Main content
-        content = QSplitter(Qt.Horizontal)
-        content.setHandleWidth(2)
+        # Main content: card with splitter (left | center | right)
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setHandleWidth(4)
+        splitter.setChildrenCollapsible(False)
 
         self.left_panel = self._build_left_panel()
-        content.addWidget(self.left_panel)
-
         self.center_panel = self._build_center_panel()
-        content.addWidget(self.center_panel)
-
         self.right_panel = self._build_right_panel()
-        content.addWidget(self.right_panel)
+        splitter.addWidget(self.left_panel)
+        splitter.addWidget(self.center_panel)
+        splitter.addWidget(self.right_panel)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 2)
+        splitter.setStretchFactor(2, 1)
 
-        content.setStretchFactor(0, 1)
-        content.setStretchFactor(1, 2)
-        content.setStretchFactor(2, 1)
+        content_wrapper = QWidget()
+        wrap_layout = QVBoxLayout(content_wrapper)
+        wrap_layout.setContentsMargins(0, 0, 0, 0)
+        wrap_layout.setSpacing(0)
+        card = ContentCard()
+        card.set_content(splitter)
+        wrap_layout.addWidget(card, 1)
 
-        root.addWidget(content, 1)
-
-        # Status bar
         self.status_bar = self._build_status_bar()
-        root.addWidget(self.status_bar)
+        wrap_layout.addWidget(self.status_bar)
 
-        # Floating delete button
+        self._scaffold.set_content(content_wrapper)
+
+        self._sticky = StickyActionBar()
+        self._sticky.set_primary_text("Export List")
+        self._sticky.primary_clicked.connect(self._on_export_list)
+        self._scaffold.set_sticky_action(self._sticky)
+
+        root.addWidget(self._scaffold, 1)
+
+        # Floating delete button (Gemini teal accent style)
         self.floating_delete = FloatingDeleteButton(self)
         self.floating_delete.clicked_with_count.connect(self._on_floating_delete_clicked)
+
+        # Smart Select FAB (Gemini style)
+        self.smart_select_fab = QPushButton("Smart Select\n0 safe", self)
+        self.smart_select_fab.setObjectName("SmartSelectFAB")
+        self.smart_select_fab.setFixedSize(140, 52)
+        self.smart_select_fab.setCursor(Qt.PointingHandCursor)
+        self.smart_select_fab.setToolTip("One-click rules: keep newest, oldest, largest, smallest. Deletion Gate keeps at least one copy.")
+        self.smart_select_fab.clicked.connect(self._on_smart_select_fab_clicked)
+        c = current_colors()
+        self.smart_select_fab.setStyleSheet(f"""
+            QPushButton#SmartSelectFAB {{
+                background: {c.get('accent', '#00C4B4')};
+                color: white;
+                border: none;
+                border-radius: 12px;
+                font-weight: bold;
+                font-size: 12px;
+            }}
+            QPushButton#SmartSelectFAB:hover {{ opacity: 0.9; }}
+        """)
+
+    def _on_compare_mode_toggled(self, checked: bool) -> None:
+        """Toggle side-by-side compare in center panel."""
+        if hasattr(self, "comparison"):
+            self.comparison.set_compare_mode(checked)
+
+    def _on_smart_select_fab_clicked(self) -> None:
+        """Focus Smart Select panel (right side); user can then click a rule."""
+        self.focus_smart_select()
+
+    def focus_smart_select(self) -> None:
+        """Focus Smart Select panel (used by Ctrl+S). Raises right panel so rules are visible."""
+        if hasattr(self, "right_panel") and self.right_panel:
+            self.right_panel.raise_()
+            self.right_panel.setFocus()
+        if hasattr(self, "smart_select_fab") and self.smart_select_fab:
+            self.smart_select_fab.setFocus()
+        self.setFocus()
+
+    def confirm_delete_selected(self) -> None:
+        """Called by global Delete shortcut."""
+        self._open_ceremony()
+
+    def on_enter(self) -> None:
+        """When Review becomes the current page, refresh stats so the delete button state is correct."""
+        super().on_enter()
+        self._update_stats()
+        self._refresh_delete_button()
+        if hasattr(self, "floating_delete") and self.floating_delete:
+            self.floating_delete.show()
+            self.floating_delete.raise_()
+            self.floating_delete.update()
+            self.floating_delete.repaint()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._position_floating_button()
 
     def _position_floating_button(self):
+        margin = 30
+        if hasattr(self, 'smart_select_fab'):
+            self.smart_select_fab.show()
+            self.smart_select_fab.move(
+                self.width() - self.smart_select_fab.width() - margin - 200,
+                self.height() - self.smart_select_fab.height() - margin - 40
+            )
+            self.smart_select_fab.raise_()
         if hasattr(self, 'floating_delete'):
-            margin = 30
             self.floating_delete.move(
                 self.width() - self.floating_delete.width() - margin,
                 self.height() - self.floating_delete.height() - margin - 40
@@ -805,24 +1016,34 @@ class ReviewPage(BaseStation):
         layout.setContentsMargins(20, 8, 20, 8)
         layout.setSpacing(20)
 
+        acc = theme_token("accent")
+        muted = theme_token("muted")
         steps = [("1", "Scan", False), ("2", "Analyze", False), ("3", "Resolve Duplicates", True)]
-
+        self._step_labels = []
         for num, text, active in steps:
             step = QLabel(f"Step {num}: {text}")
             step.setStyleSheet(f"""
                 font-weight: {'bold' if active else 'normal'};
                 font-size: 13px;
-                color: {'#3b82f6' if active else '#888'};
+                color: {acc if active else muted};
                 padding: 4px 12px;
-                background: {'rgba(59,130,246,0.1)' if active else 'transparent'};
+                background: rgba(0,196,180,0.12);
+                border-radius: 16px;
+            """ if active else f"""
+                font-weight: normal;
+                font-size: 13px;
+                color: {muted};
+                padding: 4px 12px;
+                background: transparent;
                 border-radius: 16px;
             """)
+            self._step_labels.append((step, active))
             layout.addWidget(step)
 
         layout.addStretch()
 
         self.quick_stats = QLabel("0 duplicates found")
-        self.quick_stats.setStyleSheet("font-size: 13px; color: #aaa;")
+        self.quick_stats.setStyleSheet(f"font-size: 13px; color: {muted};")
         layout.addWidget(self.quick_stats)
 
         return bar
@@ -834,20 +1055,27 @@ class ReviewPage(BaseStation):
         panel.setMaximumWidth(350)
 
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
 
         header = QHBoxLayout()
         self.select_all_cb = QCheckBox("Select All for Delete")
-        self.select_all_cb.setToolTip("Mark ALL files in ALL groups for deletion (keeps one per group)")
+        self.select_all_cb.setTristate(True)
+        self.select_all_cb.setToolTip(
+            "Unchecked: no deletions • Checked: all groups mark for delete (one kept per group) • Partially: mixed. "
+            "Deletion Gate = never deletes the last copy."
+        )
         self.select_all_cb.stateChanged.connect(self._on_select_all_changed)
         header.addWidget(self.select_all_cb)
         header.addStretch()
         layout.addLayout(header)
 
         filter_layout = QHBoxLayout()
+        filter_layout.setSpacing(12)
         filter_layout.addWidget(QLabel("Filter:"))
         self.filter_combo = QComboBox()
+        self.filter_combo.setMinimumWidth(180)
+        self.filter_combo.setMinimumHeight(36)
         self.filter_combo.addItems(["All Files", "Images", "Videos", "Audio", "Archives", "Documents", "Other"])
         self.filter_combo.currentTextChanged.connect(self._on_filter_changed)
         filter_layout.addWidget(self.filter_combo, 1)
@@ -925,9 +1153,17 @@ class ReviewPage(BaseStation):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(16)
 
+        preview_header_row = QHBoxLayout()
         preview_header = QLabel("Preview")
         preview_header.setStyleSheet("font-size: 16px; font-weight: bold;")
-        layout.addWidget(preview_header)
+        preview_header.setToolTip("Preview selected file. Pane is dockable and resizable; use zoom/compare for images.")
+        preview_header_row.addWidget(preview_header)
+        self.compare_mode_cb = QCheckBox("Compare")
+        self.compare_mode_cb.setToolTip("Side-by-side compare mode for duplicate files in this group.")
+        self.compare_mode_cb.toggled.connect(self._on_compare_mode_toggled)
+        preview_header_row.addStretch()
+        preview_header_row.addWidget(self.compare_mode_cb)
+        layout.addLayout(preview_header_row)
 
         self.preview_frame = QFrame()
         self.preview_frame.setMinimumSize(260, 260)
@@ -1013,9 +1249,15 @@ class ReviewPage(BaseStation):
         self.selection_stats.setStyleSheet("font-weight: bold; color: #ef4444;")
         layout.addWidget(self.selection_stats)
 
-        hint = QLabel("Shortcuts: ←→ Navigate | Space Toggle | Delete Confirm | 1-5 Keep")
-        hint.setStyleSheet("font-size: 10px; color: #666; margin-left: 20px;")
-        layout.addWidget(hint)
+        self.export_list_btn = QPushButton("Export List")
+        self.export_list_btn.setToolTip("Export current duplicate list to CSV or JSON.")
+        self.export_list_btn.setCursor(Qt.PointingHandCursor)
+        self.export_list_btn.clicked.connect(self._on_export_list)
+        layout.addWidget(self.export_list_btn)
+
+        self._status_hint = QLabel("Shortcuts: ←→ Navigate | Space Toggle | Delete Confirm | 1-5 Keep")
+        self._status_hint.setStyleSheet(f"font-size: 10px; color: {theme_token('muted')}; margin-left: 20px;")
+        layout.addWidget(self._status_hint)
 
         return bar
 
@@ -1046,13 +1288,39 @@ class ReviewPage(BaseStation):
 
         self._keep_states.clear()
         for g in self._all_groups:
-            self._keep_states[g.group_id] = {p: True for p in g.paths}
+            self._keep_states[g.group_id] = {_norm_path(p): True for p in g.paths}
 
         self._current_group_idx = 0 if self._filtered_groups else -1
 
         self._populate_group_list()
         self._update_display()
         self._update_stats()
+        self._refresh_delete_button()
+
+    def refresh_theme(self) -> None:
+        """Gemini 2 full theme refresh — scaffold, panels, FAB, floating delete."""
+        super().refresh_theme()
+        self.apply_theme()
+        c = current_colors()
+        panel = c.get("panel", "#151922")
+        accent = c.get("accent", "#00C4B4")
+        if hasattr(self, "left_panel") and self.left_panel:
+            self.left_panel.setStyleSheet(f"QFrame#LeftPanel {{ background: {panel}; border-radius: 12px; }}")
+        if hasattr(self, "right_panel") and self.right_panel:
+            self.right_panel.setStyleSheet(f"QFrame#RightPanel {{ background: {panel}; border-radius: 12px; }}")
+        if hasattr(self, "smart_select_fab") and self.smart_select_fab:
+            self.smart_select_fab.setStyleSheet(f"""
+                QPushButton#SmartSelectFAB {{ background: {accent}; color: white; border-radius: 12px; font-weight: bold; }}
+                QPushButton#SmartSelectFAB:hover {{ opacity: 0.9; }}
+            """)
+        if hasattr(self, "floating_delete") and self.floating_delete and hasattr(self.floating_delete, "_apply_gemini_style"):
+            self.floating_delete._apply_gemini_style()
+        if hasattr(self, "_scaffold") and self._scaffold and hasattr(self._scaffold, "refresh_theme"):
+            self._scaffold.refresh_theme()
+        if hasattr(self, "_sticky") and self._sticky and hasattr(self._sticky, "refresh_theme"):
+            self._sticky.refresh_theme()
+        self.update()
+        self.repaint()
 
     def on_theme_changed(self):
         self.apply_theme()
@@ -1086,18 +1354,96 @@ class ReviewPage(BaseStation):
             if item.widget():
                 item.widget().deleteLater()
 
-        for group in self._filtered_groups:
+        total = len(self._filtered_groups)
+        cap = min(total, MAX_GROUP_LIST_ITEMS)
+        for group in self._filtered_groups[:cap]:
             item = GroupListItem(group.group_id, group)
             item.clicked.connect(self._on_group_clicked)
             item.checkbox_changed.connect(self._on_group_checkbox_changed)
-
             keep_map = self._keep_states.get(group.group_id, {})
-            all_delete = all(not keep_map.get(p, True) for p in group.paths)
-            item.checkbox.setChecked(all_delete)
-
+            delete_count = sum(
+                1 for p in group.paths if not keep_map.get(_norm_path(str(p) if p else ""), True)
+            )
+            all_kept = delete_count == 0
+            all_delete = delete_count == len(group.paths) - 1 and len(group.paths) >= 2
+            item.checkbox.blockSignals(True)
+            if all_kept:
+                item.checkbox.setCheckState(Qt.Unchecked)
+            elif all_delete:
+                item.checkbox.setCheckState(Qt.Checked)
+            else:
+                item.checkbox.setCheckState(Qt.PartiallyChecked)
+            item.checkbox.blockSignals(False)
             self.group_list_layout.addWidget(item)
 
+        if total > cap:
+            cap_label = QLabel(f"Showing first {cap} of {total} groups. Use Prev/Next to navigate all.")
+            cap_label.setStyleSheet("color: #94a3b8; font-size: 11px; padding: 8px;")
+            cap_label.setWordWrap(True)
+            self.group_list_layout.addWidget(cap_label)
         self.group_list_layout.addStretch()
+
+    def _update_group_list_item(self, group_id: int) -> None:
+        """Sync the GroupListItem checkbox for group_id to current keep_map (avoids out-of-sync after file toggles)."""
+        for i in range(self.group_list_layout.count()):
+            item = self.group_list_layout.itemAt(i)
+            if not item:
+                continue
+            w = item.widget()
+            if not isinstance(w, GroupListItem) or w.group_id != group_id:
+                continue
+            group = next((g for g in self._all_groups if g.group_id == group_id), None)
+            if not group:
+                return
+            keep_map = self._keep_states.get(group_id, {})
+            delete_count = sum(
+                1 for p in group.paths if not keep_map.get(_norm_path(str(p) if p else ""), True)
+            )
+            all_kept = delete_count == 0
+            all_delete = delete_count == len(group.paths) - 1 and len(group.paths) >= 2
+            w.checkbox.blockSignals(True)
+            if all_kept:
+                w.checkbox.setCheckState(Qt.Unchecked)
+            elif all_delete:
+                w.checkbox.setCheckState(Qt.Checked)
+            else:
+                w.checkbox.setCheckState(Qt.PartiallyChecked)
+            w.checkbox.blockSignals(False)
+            break
+
+    def _sync_group_checkboxes(self) -> None:
+        """Set all visible group list item checkboxes from current _keep_states (used after batch updates)."""
+        for i in range(self.group_list_layout.count()):
+            item = self.group_list_layout.itemAt(i)
+            if not item:
+                continue
+            w = item.widget()
+            if not isinstance(w, GroupListItem):
+                continue
+            group_id = w.group_id
+            group = next((g for g in self._all_groups if g.group_id == group_id), None)
+            if not group:
+                continue
+            keep_map = self._keep_states.get(group_id, {})
+            delete_count = sum(
+                1 for p in group.paths if not keep_map.get(_norm_path(str(p) if p else ""), True)
+            )
+            all_kept = delete_count == 0
+            all_delete = delete_count == len(group.paths) - 1 and len(group.paths) >= 2
+            w.checkbox.blockSignals(True)
+            if all_kept:
+                w.checkbox.setCheckState(Qt.Unchecked)
+            elif all_delete:
+                w.checkbox.setCheckState(Qt.Checked)
+            else:
+                w.checkbox.setCheckState(Qt.PartiallyChecked)
+            w.checkbox.blockSignals(False)
+
+    def _refresh_all_ui(self) -> None:
+        """Sync group checkboxes, current group display, and stats (call once after batch updates)."""
+        self._sync_group_checkboxes()
+        self._update_display()
+        self._update_stats()
 
     def _update_display(self):
         group = self._get_current_group()
@@ -1115,13 +1461,15 @@ class ReviewPage(BaseStation):
 
         display_paths = group.paths[:2] if len(group.paths) >= 2 else group.paths
         self.comparison.set_comparison(display_paths, group.similarity)
+        kept_files = [p for p in group.paths if keep_map.get(_norm_path(p), True)]
+        kept_path = kept_files[0] if kept_files else (group.paths[0] if group.paths else None)
+        if hasattr(self.comparison, "set_kept_path") and kept_path:
+            self.comparison.set_kept_path(kept_path)
 
         self._populate_file_table(group, keep_map)
 
-        kept_files = [p for p in group.paths if keep_map.get(p, True)]
-        preview_file = kept_files[0] if kept_files else (group.paths[0] if group.paths else None)
-        if preview_file:
-            self._update_preview(preview_file)
+        if kept_path:
+            self._update_preview(kept_path)
 
         for i in range(self.group_list_layout.count()):
             item = self.group_list_layout.itemAt(i)
@@ -1129,32 +1477,32 @@ class ReviewPage(BaseStation):
                 item.widget().set_selected(item.widget().group_id == group.group_id)
 
     def _populate_file_table(self, group, keep_map):
-        self.file_table.setRowCount(0)
-
-        for row, path in enumerate(group.paths):
-            self.file_table.insertRow(row)
-
-            delete_checkbox = QTableWidgetItem()
-            delete_checkbox.setFlags(delete_checkbox.flags() | Qt.ItemIsUserCheckable)
-            is_delete = not keep_map.get(path, True)
-            delete_checkbox.setCheckState(Qt.Checked if is_delete else Qt.Unchecked)
-            delete_checkbox.setData(Qt.UserRole, path)
-            self.file_table.setItem(row, 0, delete_checkbox)
-
-            name = f"[{row + 1}] {Path(path).name}"
-            name_item = QTableWidgetItem(name)
-            name_item.setToolTip(f"Press {row + 1} to keep this file\n{path}")
-            self.file_table.setItem(row, 1, name_item)
-
-            try:
-                size = os.path.getsize(path)
-            except:
-                size = 0
-            size_item = QTableWidgetItem(format_bytes(size))
-            size_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.file_table.setItem(row, 2, size_item)
-
-        self.file_table.resizeColumnsToContents()
+        self.file_table.blockSignals(True)
+        try:
+            self.file_table.setRowCount(0)
+            for row, path in enumerate(group.paths):
+                self.file_table.insertRow(row)
+                delete_checkbox = QTableWidgetItem()
+                delete_checkbox.setFlags(delete_checkbox.flags() | Qt.ItemIsUserCheckable)
+                is_delete = not keep_map.get(_norm_path(path), True)
+                delete_checkbox.setCheckState(Qt.Checked if is_delete else Qt.Unchecked)
+                path_str = str(path) if path is not None else ""
+                delete_checkbox.setData(Qt.UserRole, path_str)
+                self.file_table.setItem(row, 0, delete_checkbox)
+                name = f"[{row + 1}] {Path(path).name}"
+                name_item = QTableWidgetItem(name)
+                name_item.setToolTip(f"Press {row + 1} to keep this file\n{path}")
+                self.file_table.setItem(row, 1, name_item)
+                try:
+                    size = os.path.getsize(path)
+                except Exception:
+                    size = 0
+                size_item = QTableWidgetItem(format_bytes(size))
+                size_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.file_table.setItem(row, 2, size_item)
+            self.file_table.resizeColumnsToContents()
+        finally:
+            self.file_table.blockSignals(False)
 
     def _update_preview(self, file_path: str):
         if is_image_file(file_path):
@@ -1183,29 +1531,122 @@ class ReviewPage(BaseStation):
             self.detail_size.setText("Size: -")
             self.detail_modified.setText("Modified: -")
 
+    def _compute_delete_count(self):
+        """Single source of truth: count paths marked for delete from _keep_states + _filtered_groups."""
+        delete_count = 0
+        delete_paths = []
+        for g in self._filtered_groups:
+            keep_map = self._keep_states.get(g.group_id, {})
+            for p in g.paths:
+                key = _norm_path(str(p) if p else "")
+                if not keep_map.get(key, True):
+                    delete_count += 1
+                    delete_paths.append(p)
+        return delete_count, delete_paths
+
+    def _refresh_delete_button(self) -> None:
+        """Force-update floating delete button from current _keep_states (call after any selection change)."""
+        delete_count, delete_paths = self._compute_delete_count()
+        if not hasattr(self, "floating_delete") or self.floating_delete is None:
+            return
+        size = 0
+        if len(delete_paths) <= STATS_SIZE_CHUNK:
+            for p in delete_paths:
+                try:
+                    size += os.path.getsize(p)
+                except Exception:
+                    pass
+        self.floating_delete.update_count(delete_count, size)
+        self.floating_delete.setEnabled(delete_count > 0)
+        self.floating_delete.update()
+        self.floating_delete.repaint()
+
     def _update_stats(self):
         total_groups = len(self._filtered_groups)
         total_files = sum(g.file_count for g in self._filtered_groups)
         total_size = sum(g.recoverable_bytes for g in self._filtered_groups)
 
-        delete_count = 0
-        delete_size = 0
+        delete_count, delete_paths = self._compute_delete_count()
+        n_none = 0
+        n_full = 0
         for g in self._filtered_groups:
             keep_map = self._keep_states.get(g.group_id, {})
-            for p in g.paths:
-                if not keep_map.get(p, True):
-                    delete_count += 1
-                    try:
-                        delete_size += os.path.getsize(p)
-                    except:
-                        pass
+            delete_in_group = sum(
+                1 for p in g.paths if not keep_map.get(_norm_path(str(p) if p else ""), True)
+            )
+            if delete_in_group == 0:
+                n_none += 1
+            elif delete_in_group == len(g.paths) - 1 and len(g.paths) >= 2:
+                n_full += 1
 
+        if hasattr(self, "select_all_cb") and self.select_all_cb is not None:
+            self.select_all_cb.blockSignals(True)
+            if total_groups == 0:
+                self.select_all_cb.setCheckState(Qt.Unchecked)
+            elif n_none == total_groups:
+                self.select_all_cb.setCheckState(Qt.Unchecked)
+            elif n_full == total_groups:
+                self.select_all_cb.setCheckState(Qt.Checked)
+            else:
+                self.select_all_cb.setCheckState(Qt.PartiallyChecked)
+            self.select_all_cb.blockSignals(False)
+
+        if len(delete_paths) <= STATS_SIZE_CHUNK:
+            delete_size = 0
+            for p in delete_paths:
+                try:
+                    delete_size += os.path.getsize(p)
+                except Exception:
+                    pass
+            self._apply_stats_ui(delete_count, delete_size, total_groups, total_files, total_size)
+        else:
+            self._apply_stats_ui(delete_count, 0, total_groups, total_files, total_size)
+            if self._size_calc_timer is not None:
+                try:
+                    self._size_calc_timer.stop()
+                except Exception:
+                    pass
+            self._pending_size_paths = delete_paths
+            self._pending_size_total = 0
+            self._pending_size_count = delete_count
+            QTimer.singleShot(0, self._chunked_size_next)
+        self._refresh_delete_button()
+
+    def _apply_stats_ui(self, delete_count: int, delete_size: int, total_groups: int,
+                        total_files: int, total_size: int):
         self.quick_stats.setText(f"{total_groups} groups • {total_files} files • {format_bytes(total_size)}")
         self.left_summary.setText(f"Showing {total_groups} of {len(self._all_groups)} groups")
         self.status_text.setText(f"{delete_count} files marked for deletion")
         self.selection_stats.setText(f"{delete_count} files selected for deletion ({format_bytes(delete_size)})")
+        if hasattr(self, "floating_delete") and self.floating_delete is not None:
+            self.floating_delete.update_count(delete_count, delete_size)
+            self.floating_delete.setEnabled(delete_count > 0)
+            self.floating_delete.update()
+            self.floating_delete.repaint()
+        safe_count = total_files - delete_count
+        if hasattr(self, "smart_select_fab"):
+            self.smart_select_fab.setText(f"Smart Select\n{safe_count} safe")
 
-        self.floating_delete.update_count(delete_count, delete_size)
+    def _chunked_size_next(self):
+        if not self._pending_size_paths:
+            return
+        chunk = self._pending_size_paths[:STATS_SIZE_CHUNK]
+        self._pending_size_paths = self._pending_size_paths[STATS_SIZE_CHUNK:]
+        for p in chunk:
+            try:
+                self._pending_size_total += os.path.getsize(p)
+            except Exception:
+                pass
+        if not self._pending_size_paths:
+            cnt = getattr(self, "_pending_size_count", 0)
+            self.selection_stats.setText(f"{cnt} files selected for deletion ({format_bytes(self._pending_size_total)})")
+            if hasattr(self, "floating_delete") and self.floating_delete is not None:
+                self.floating_delete.update_count(cnt, self._pending_size_total)
+                self.floating_delete.setEnabled(cnt > 0)
+                self.floating_delete.update()
+                self.floating_delete.repaint()
+            return
+        QTimer.singleShot(0, self._chunked_size_next)
 
     def _prev_file_in_table(self):
         current = self.file_table.currentRow()
@@ -1234,10 +1675,12 @@ class ReviewPage(BaseStation):
 
         keep_map = self._keep_states.get(group.group_id, {})
         for i, p in enumerate(group.paths):
-            keep_map[p] = (i == idx)
-
+            keep_map[_norm_path(p)] = (i == idx)
+        self._keep_states[group.group_id] = keep_map
         self._update_display()
         self._update_stats()
+        self._update_group_list_item(group.group_id)
+        self._refresh_delete_button()
 
     def _on_group_clicked(self, group_id: int):
         for i, g in enumerate(self._filtered_groups):
@@ -1247,6 +1690,8 @@ class ReviewPage(BaseStation):
         self._update_display()
 
     def _on_group_checkbox_changed(self, group_id: int, checked: bool):
+        if self._batch_updating:
+            return
         group = None
         for g in self._all_groups:
             if g.group_id == group_id:
@@ -1260,52 +1705,80 @@ class ReviewPage(BaseStation):
 
         if checked:
             for i, p in enumerate(group.paths):
-                keep_map[p] = (i == 0)
+                keep_map[_norm_path(p)] = (i == 0)
         else:
             for p in group.paths:
-                keep_map[p] = True
+                keep_map[_norm_path(p)] = True
 
+        self._keep_states[group_id] = keep_map
         self._update_display()
         self._update_stats()
+        self._update_group_list_item(group_id)
+        self._refresh_delete_button()
 
     def _on_select_all_changed(self, state):
         check = (state == Qt.Checked)
-        for g in self._filtered_groups:
-            self._on_group_checkbox_changed(g.group_id, check)
+        self._batch_updating = True
+        try:
+            for g in self._filtered_groups:
+                keep_map = {}
+                for i, p in enumerate(g.paths):
+                    keep_map[_norm_path(p)] = (i == 0) if check else True
+                self._keep_states[g.group_id] = keep_map
+        finally:
+            self._batch_updating = False
+        self._refresh_all_ui()
 
     def _on_file_table_changed(self, item):
-        if item.column() != 0:
+        if self._batch_updating:
+            return
+        if item is None or item.column() != 0:
             return
 
         path = item.data(Qt.UserRole)
+        path = str(path).strip() if path is not None else ""
         delete = (item.checkState() == Qt.Checked)
 
         group = self._get_current_group()
-        if not group:
+        if not group or not path:
             return
 
         keep_map = self._keep_states.get(group.group_id, {})
-        keep_map[path] = not delete
+        if not keep_map:
+            keep_map = {_norm_path(str(p) or ""): True for p in group.paths}
+        keep_map[_norm_path(path)] = not delete
 
         kept_count = sum(1 for v in keep_map.values() if v)
         if kept_count == 0:
             item.setCheckState(Qt.Unchecked)
-            keep_map[path] = True
+            keep_map[_norm_path(path)] = True
             QMessageBox.warning(self, "Invalid Selection", "You must keep at least one file per group.")
 
+        self._keep_states[group.group_id] = keep_map
+        self._update_display()
         self._update_stats()
+        self._update_group_list_item(group.group_id)
+        self._refresh_delete_button()
 
     def _on_comparison_keep_selected(self, file_path: str):
+        if self._batch_updating:
+            return
         group = self._get_current_group()
         if not group:
             return
 
+        file_path_norm = _norm_path(file_path)
         keep_map = self._keep_states.get(group.group_id, {})
-        for p in keep_map:
-            keep_map[p] = (p == file_path)
+        if not keep_map:
+            keep_map = {_norm_path(p): True for p in group.paths}
+        for p in group.paths:
+            keep_map[_norm_path(p)] = (_norm_path(p) == file_path_norm)
+        self._keep_states[group.group_id] = keep_map
 
         self._update_display()
         self._update_stats()
+        self._update_group_list_item(group.group_id)
+        self._refresh_delete_button()
 
     def _prev_group(self):
         if self._current_group_idx > 0:
@@ -1335,41 +1808,67 @@ class ReviewPage(BaseStation):
     def _apply_smart_to_filtered(self, criteria: str):
         if not self._filtered_groups:
             return
+        if self._smart_select_worker is not None and self._smart_select_worker.isRunning():
+            self._bus.notify("Busy", "Smart Select already running…", 1500)
+            return
 
-        applied_count = 0
+        groups_data = [(g.group_id, list(g.paths)) for g in self._filtered_groups]
+        self._smart_select_worker = SmartSelectWorker(groups_data, criteria, self)
+        self._smart_select_worker.finished_result.connect(self._on_smart_select_finished)
+        self._smart_select_worker.finished.connect(self._smart_select_worker.deleteLater)
+        self._smart_select_worker.finished.connect(lambda: setattr(self, "_smart_select_worker", None))
+        if hasattr(self, "status_text"):
+            self.status_text.setText("Applying Smart Select…")
+        self._smart_select_worker.start()
 
-        for group in self._filtered_groups:
-            keep_map = self._keep_states.get(group.group_id, {})
-
-            try:
-                if criteria == "first" and group.paths:
-                    keeper = group.paths[0]
-                elif criteria == "oldest" and group.paths:
-                    keeper = min(group.paths, key=lambda p: os.path.getmtime(p))
-                elif criteria == "newest" and group.paths:
-                    keeper = max(group.paths, key=lambda p: os.path.getmtime(p))
-                elif criteria == "largest" and group.paths:
-                    keeper = max(group.paths, key=lambda p: os.path.getsize(p))
-                elif criteria == "smallest" and group.paths:
-                    keeper = min(group.paths, key=lambda p: os.path.getsize(p))
-                else:
-                    continue
-
-                for p in group.paths:
-                    keep_map[p] = (p == keeper)
-
-                applied_count += 1
-            except Exception:
-                continue
-
-        self._update_display()
-        self._update_stats()
-
+    @Slot(object)
+    def _on_smart_select_finished(self, result: dict):
+        result = result or {}
+        self._batch_updating = True
+        try:
+            for group_id, keep_map in result.items():
+                self._keep_states[group_id] = {_norm_path(p): v for p, v in (keep_map or {}).items()}
+        finally:
+            self._batch_updating = False
+        self._refresh_all_ui()
+        if hasattr(self, "status_text"):
+            self.status_text.setText(f"{len(result)} groups updated")
         self._bus.notify(
             "Smart Select Applied",
-            f"Applied '{criteria}' to {applied_count} groups",
+            f"Applied to {len(result)} groups",
             2000
         )
+
+    def _on_export_list(self):
+        """Export current duplicate list to CSV or JSON."""
+        groups = self._filtered_groups or self._all_groups
+        if not groups:
+            QMessageBox.information(self, "Export List", "No duplicate groups to export.")
+            return
+        path, selected_filter = QFileDialog.getSaveFileName(
+            self, "Export Duplicate List", "", "CSV (*.csv);;JSON (*.json)"
+        )
+        if not path:
+            return
+        try:
+            if path.endswith(".json") or "JSON" in (selected_filter or ""):
+                import json
+                data = [
+                    {"group_id": g.group_id, "paths": g.paths, "similarity": getattr(g, "similarity", None)}
+                    for g in groups
+                ]
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+            else:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write("group_id,path,similarity\n")
+                    for g in groups:
+                        sim = getattr(g, "similarity", "") or ""
+                        for p in g.paths:
+                            f.write(f"{g.group_id},{repr(p)},{sim}\n")
+            QMessageBox.information(self, "Export List", f"Exported to {path}")
+        except Exception as e:
+            QMessageBox.warning(self, "Export Error", str(e))
 
     def _on_floating_delete_clicked(self, count: int = 0, size: int = 0):
         self._open_ceremony()
@@ -1378,18 +1877,29 @@ class ReviewPage(BaseStation):
         delete_groups = []
         total_delete_size = 0
 
-        for g in self._filtered_groups:
+        for idx, g in enumerate(self._filtered_groups):
             keep_map = self._keep_states.get(g.group_id, {})
-            delete_paths = [p for p in g.paths if not keep_map.get(p, True)]
+            kept_paths = [p for p in g.paths if keep_map.get(_norm_path(p), True)]
+            delete_paths = [p for p in g.paths if not keep_map.get(_norm_path(p), True)]
 
-            if delete_paths:
-                group_size = sum(os.path.getsize(p) for p in delete_paths if os.path.exists(p))
-                total_delete_size += group_size
-                delete_groups.append({
-                    "paths": delete_paths,
-                    "hint": g.hint,
-                    "recoverable_bytes": group_size,
-                })
+            if not delete_paths:
+                continue
+            # Pipeline requires exactly one "keep" per group; use first kept path (must be str for pipeline)
+            keep_path = kept_paths[0] if kept_paths else g.paths[0]
+            keep_path = str(keep_path) if keep_path else ""
+            delete_paths_str = [str(p) for p in delete_paths if p]
+            if not keep_path or not os.path.exists(keep_path):
+                continue
+            group_size = sum(os.path.getsize(p) for p in delete_paths if os.path.exists(p))
+            total_delete_size += group_size
+            delete_groups.append({
+                "group_index": idx,
+                "keep": keep_path,
+                "delete": delete_paths_str,
+                "paths": delete_paths_str,
+                "hint": g.hint,
+                "recoverable_bytes": group_size,
+            })
 
         if not delete_groups:
             QMessageBox.information(
@@ -1400,7 +1910,7 @@ class ReviewPage(BaseStation):
             )
             return
 
-        total_files = sum(len(g["paths"]) for g in delete_groups)
+        total_files = sum(len(g["delete"]) for g in delete_groups)
 
         reply = QMessageBox.question(
             self,
@@ -1424,20 +1934,26 @@ class ReviewPage(BaseStation):
             "recoverable_bytes": total_delete_size,
         }
 
-        cleanup_data = {"groups": delete_groups, "stats": stats}
+        cleanup_data = {
+            "groups": delete_groups,
+            "stats": stats,
+            "policy": {"mode": "trash"},
+            "source": "review_page",
+        }
         self.cleanup_confirmed.emit(cleanup_data)
 
     def _on_cleanup_cancelled(self):
         self._bus.notify("Cleanup Cancelled", "File deletion was cancelled", 2000)
 
     def apply_theme(self):
-        c = ThemeHelper.colors()
+        from cerebro.ui.theme_engine import current_colors
+        c = current_colors()
         bg = c.get('bg', '#0f1115')
-        surface = c.get('surface', '#151922')
+        surface = c.get('panel', '#151922')
         panel = c.get('panel', '#1a1d26')
         text = c.get('text', '#e7ecf2')
         line = c.get('line', '#2a3241')
-        accent = c.get('accent', '#3b82f6')
+        accent = c.get('accent', '#00C4B4')
 
         self.setStyleSheet(f"""
             ReviewPage {{
@@ -1525,6 +2041,29 @@ class ReviewPage(BaseStation):
             }}
         """)
 
+        if hasattr(self, '_step_labels'):
+            acc = c.get('accent', '#00C4B4')
+            muted = c.get('muted', '#888')
+            for step_label, active in self._step_labels:
+                step_label.setStyleSheet(f"""
+                    font-weight: {'bold' if active else 'normal'};
+                    font-size: 13px;
+                    color: {acc if active else muted};
+                    padding: 4px 12px;
+                    background: rgba(0,196,180,0.12);
+                    border-radius: 16px;
+                """ if active else f"""
+                    font-weight: normal;
+                    font-size: 13px;
+                    color: {muted};
+                    padding: 4px 12px;
+                    background: transparent;
+                    border-radius: 16px;
+                """)
+        if hasattr(self, 'quick_stats'):
+            self.quick_stats.setStyleSheet(f"font-size: 13px; color: {c.get('muted', '#aaa')};")
+        if hasattr(self, '_status_hint'):
+            self._status_hint.setStyleSheet(f"font-size: 10px; color: {c.get('muted', '#666')}; margin-left: 20px;")
         if hasattr(self, 'floating_delete'):
             self.floating_delete._apply_style()
 

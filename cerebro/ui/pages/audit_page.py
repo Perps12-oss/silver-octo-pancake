@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Optional, Callable
 
 from PySide6.QtCore import Qt, Signal, Slot, QThread
+from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -894,17 +895,40 @@ class AuditPage(BaseStation):
     def __init__(self, parent: Optional[QWidget] = None):
         """
         Initialize audit page.
-        
+
         Args:
             parent: Parent widget
         """
         super().__init__(parent)
-        
+        self.setAcceptDrops(True)
         self._bus = get_state_bus()
         self._current_worker: Optional[AuditWorker] = None
         self._tools_panel: Optional[QFrame] = None
         self._console: Optional[AuditConsole] = None
+        self._drag_highlight = False
         self._build_ui()
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if event.mimeData() and event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            self._drag_highlight = True
+            self.setStyleSheet("border: 2px solid #00C4B4; border-radius: 12px;")
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        self._drag_highlight = False
+        self.setStyleSheet("")
+        if event.mimeData() and event.mimeData().hasUrls():
+            url = event.mimeData().urls()[0]
+            path = url.toLocalFile()
+            if path and Path(path).is_dir() and hasattr(self._bus, "resume_scan_requested"):
+                self._bus.resume_scan_requested.emit({"root": path})
+                event.acceptProposedAction()
+                return
+        event.ignore()
+
+    def dragLeaveEvent(self, event) -> None:
+        self._drag_highlight = False
+        self.setStyleSheet("")
     
     # ========================================================================
     # UI Construction
@@ -946,20 +970,26 @@ class AuditPage(BaseStation):
         layout.setSpacing(CARD_SPACING)
         layout.setContentsMargins(0, 0, 0, 0)
         
-        # Define tools
+        # Define tools (title, description, icon, tooltip)
         tools = [
-            (AuditType.INTEGRITY_CHECK, "Integrity Check", "Verify scan data integrity", "🔒"),
-            (AuditType.GENERATE_REPORT, "Generate Report", "Create detailed audit report", "📄"),
-            (AuditType.DELETION_HISTORY, "Deletion History", "View deletion log", "🗑️"),
-            (AuditType.VERIFY_RESULTS, "Verify Results", "Cross-check scan results", "✓"),
-            (AuditType.EXPORT_DATA, "Export Data", "Export to CSV/JSON", "💾"),
+            (AuditType.INTEGRITY_CHECK, "Integrity Check", "Verify scan data integrity", "🔒",
+             "Verify cache, config, and scan data integrity. Safe to run anytime."),
+            (AuditType.GENERATE_REPORT, "Generate Report", "Create detailed audit report", "📄",
+             "Create a detailed audit report for records or debugging."),
+            (AuditType.DELETION_HISTORY, "Deletion History", "View deletion log", "🗑️",
+             "View log of past deletions. Deletion Gate ensures we never delete the last copy."),
+            (AuditType.VERIFY_RESULTS, "Verify Results", "Cross-check scan results", "✓",
+             "Cross-check scan results against hash cache and files."),
+            (AuditType.EXPORT_DATA, "Export Data", "Export to CSV/JSON", "💾",
+             "Export audit data to CSV or JSON for backup or analysis."),
         ]
-        
+
         # Create tool cards in grid
-        for idx, (audit_type, title, desc, icon) in enumerate(tools):
+        for idx, (audit_type, title, desc, icon, tooltip) in enumerate(tools):
             card = AuditToolCard(audit_type, title, desc, icon)
+            card.setToolTip(tooltip)
             card.clicked.connect(self._handle_tool_clicked)
-            
+
             row = idx // 2
             col = idx % 2
             layout.addWidget(card, row, col)

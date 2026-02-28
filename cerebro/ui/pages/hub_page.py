@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal, Slot
+from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -684,16 +685,38 @@ class HubPage(BaseStation):
     def __init__(self, parent: Optional[QWidget] = None):
         """
         Initialize hub page.
-        
+
         Args:
             parent: Parent widget
         """
         super().__init__(parent)
-        
+        self.setAcceptDrops(True)
         self._bus = get_state_bus()
         self._current_view = HubTool.PERFORMANCE
-        
+        self._drag_highlight = False
         self._build_ui()
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if event.mimeData() and event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            self._drag_highlight = True
+            self.setStyleSheet("border: 2px solid #00C4B4; border-radius: 12px;")
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        self._drag_highlight = False
+        self.setStyleSheet("")
+        if event.mimeData() and event.mimeData().hasUrls():
+            url = event.mimeData().urls()[0]
+            path = url.toLocalFile()
+            if path and Path(path).is_dir() and hasattr(self._bus, "resume_scan_requested"):
+                self._bus.resume_scan_requested.emit({"root": path})
+                event.acceptProposedAction()
+                return
+        event.ignore()
+
+    def dragLeaveEvent(self, event) -> None:
+        self._drag_highlight = False
+        self.setStyleSheet("")
     
     # ========================================================================
     # UI Construction
@@ -727,17 +750,22 @@ class HubPage(BaseStation):
         layout.setSpacing(CARD_SPACING)
         layout.setContentsMargins(0, 0, 0, 0)
         
-        # Define tools
+        # Define tools (tool, title, desc, icon, enabled, tooltip)
         tools = [
-            (HubTool.PERFORMANCE, "Performance", "Monitor system resources", "📈", True),
-            (HubTool.LOGS, "Logs", "View application logs", "🗂️", True),
-            (HubTool.UPDATES, "Updates", "Check for updates", "⬆️", True),
-            (HubTool.ABOUT, "About", "Application information", "ℹ️", True),
+            (HubTool.PERFORMANCE, "Performance", "Monitor system resources", "📈", True,
+             "Monitor CPU, memory, and disk usage. Useful during long scans."),
+            (HubTool.LOGS, "Logs", "View application logs", "🗂️", True,
+             "View and export application logs for debugging."),
+            (HubTool.UPDATES, "Updates", "Check for updates", "⬆️", True,
+             "Check for application updates."),
+            (HubTool.ABOUT, "About", "Application information", "ℹ️", True,
+             "Application version and information."),
         ]
-        
+
         # Create cards
-        for idx, (tool, title, desc, icon, enabled) in enumerate(tools):
+        for idx, (tool, title, desc, icon, enabled, tooltip) in enumerate(tools):
             card = HubToolCard(tool, title, desc, icon, enabled)
+            card.setToolTip(tooltip)
             card.clicked.connect(self._show_tool)
             
             row = idx // 2

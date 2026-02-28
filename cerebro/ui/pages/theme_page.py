@@ -1,8 +1,10 @@
 # cerebro/ui/pages/theme_page.py
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional, List
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QFrame, QScrollArea, QGridLayout,
@@ -11,6 +13,7 @@ from PySide6.QtWidgets import (
 from cerebro.ui.components.modern import PageHeader, PageScaffold, ThemeCard
 from cerebro.ui.components.modern._tokens import token as theme_token
 from cerebro.ui.pages.base_station import BaseStation
+from cerebro.ui.state_bus import get_state_bus
 from cerebro.ui.theme_engine import get_theme_manager, ThemeSpec
 
 REQUIRED_PALETTE_KEYS = ("bg", "panel", "accent", "text")
@@ -28,13 +31,38 @@ class ThemePage(BaseStation):
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
+        self.setAcceptDrops(True)
         self._theme = get_theme_manager()
+        self._bus = get_state_bus()
         self._all: List[ThemeSpec] = []
         self._cards: List[ThemeCard] = []
         self._last_query = ""
+        self._drag_highlight = False
         self._build_ui()
         self._load()
         self._theme.theme_changed.connect(self._on_theme_changed)
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if event.mimeData() and event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            self._drag_highlight = True
+            self.setStyleSheet(f"border: 2px solid {theme_token('accent')}; border-radius: 12px;")
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        self._drag_highlight = False
+        self.setStyleSheet("")
+        if event.mimeData() and event.mimeData().hasUrls():
+            url = event.mimeData().urls()[0]
+            path = url.toLocalFile()
+            if path and Path(path).is_dir() and hasattr(self._bus, "resume_scan_requested"):
+                self._bus.resume_scan_requested.emit({"root": path})
+                event.acceptProposedAction()
+                return
+        event.ignore()
+
+    def dragLeaveEvent(self, event) -> None:
+        self._drag_highlight = False
+        self.setStyleSheet("")
 
     def _on_theme_changed(self) -> None:
         self._render()

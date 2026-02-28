@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -69,10 +70,14 @@ class NotifyDuration:
 
 
 class LayoutMetrics:
-    """UI layout constants (pixels)."""
-    PAGE_MARGIN = 18
-    PAGE_SPACING = 12
+    """UI layout constants (pixels). Generous spacing for readability (Gemini-like)."""
+    PAGE_MARGIN = 24
+    PAGE_SPACING = 20
     MIN_LIVE_WIDTH = 420
+    MIN_LIVE_PANEL_HEIGHT = 280  # Bottom progress/warnings area never squashed
+    COMBO_MIN_WIDTH = 180
+    COMBO_LONG_MIN_WIDTH = 300
+    BUTTON_MIN_HEIGHT = 40
 
 
 class StatusText:
@@ -234,7 +239,7 @@ class ScanPage(BaseStation):
         self._scaffold.set_header(header)
 
     def _build_content(self) -> None:
-        """Create the scrollable content area and its child widgets."""
+        """Create content: scrollable top (folder, filters, button, stats) + fixed-min-height live panel."""
         content = QWidget()
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(
@@ -245,11 +250,31 @@ class ScanPage(BaseStation):
         )
         content_layout.setSpacing(LayoutMetrics.PAGE_SPACING)
 
-        self._build_folder_picker(content_layout)
-        self._build_scan_filters(content_layout)
-        self._build_prominent_scan_button(content_layout)
-        self._build_stat_row(content_layout)
-        self._build_main_panels(content_layout)
+        # Top section (scrollable) so it can shrink without squashing the live panel
+        top = QWidget()
+        top_layout = QVBoxLayout(top)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(LayoutMetrics.PAGE_SPACING)
+        self._build_folder_picker(top_layout)
+        self._build_scan_filters(top_layout)
+        self._build_prominent_scan_button(top_layout)
+        self._build_stat_row(top_layout)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(top)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setMinimumHeight(120)
+        content_layout.addWidget(scroll, 1)
+
+        # Bottom: live scan panel with guaranteed min height so it's never squashed
+        self._live = LiveScanPanel()
+        self._live.setMinimumWidth(LayoutMetrics.MIN_LIVE_WIDTH)
+        self._live.setMinimumHeight(LayoutMetrics.MIN_LIVE_PANEL_HEIGHT)
+        live_card = ContentCard()
+        live_card.set_content(self._live)
+        content_layout.addWidget(live_card, 0)
 
         self._scaffold.set_content(content)
 
@@ -265,6 +290,8 @@ class ScanPage(BaseStation):
 
         filter_row.addWidget(QLabel("Scan type:"))
         self._media_type_combo = QComboBox()
+        self._media_type_combo.setMinimumWidth(LayoutMetrics.COMBO_MIN_WIDTH)
+        self._media_type_combo.setMinimumHeight(LayoutMetrics.BUTTON_MIN_HEIGHT)
         self._media_type_combo.addItems(["All", "Photos only", "Videos only", "Audio only"])
         self._media_type_combo.setCurrentIndex(0)
         self._media_type_combo.setToolTip("Limit scan to specific media types")
@@ -272,6 +299,8 @@ class ScanPage(BaseStation):
 
         filter_row.addWidget(QLabel("Engine:"))
         self._engine_combo = QComboBox()
+        self._engine_combo.setMinimumWidth(LayoutMetrics.COMBO_MIN_WIDTH)
+        self._engine_combo.setMinimumHeight(LayoutMetrics.BUTTON_MIN_HEIGHT)
         self._engine_combo.addItems(["Simple", "Advanced"])
         self._engine_combo.setCurrentIndex(0)
         self._engine_combo.setToolTip("Simple: fast, balanced. Advanced: more workers, thorough.")
@@ -283,8 +312,10 @@ class ScanPage(BaseStation):
         scanner_row = QHBoxLayout()
         scanner_row.setSpacing(LayoutMetrics.PAGE_SPACING)
         
-        scanner_row.addWidget(QLabel("🚀 Scanner:"))
+        scanner_row.addWidget(QLabel("Scanner:"))
         self._scanner_tier_combo = QComboBox()
+        self._scanner_tier_combo.setMinimumWidth(LayoutMetrics.COMBO_LONG_MIN_WIDTH)
+        self._scanner_tier_combo.setMinimumHeight(LayoutMetrics.BUTTON_MIN_HEIGHT)
         self._scanner_tier_combo.addItems([
             "Turbo (12x faster - Production)",
             "Ultra (60x faster - Extreme)",
@@ -349,14 +380,6 @@ class ScanPage(BaseStation):
         stat_row.addWidget(self._stat_eta)
 
         parent_layout.addLayout(stat_row)
-
-    def _build_main_panels(self, parent_layout: QVBoxLayout) -> None:
-        """Add the live scan panel (full width). Scan presets and advanced options are in Settings > Scanning."""
-        self._live = LiveScanPanel()
-        self._live.setMinimumWidth(LayoutMetrics.MIN_LIVE_WIDTH)
-        live_card = ContentCard()
-        live_card.set_content(self._live)
-        parent_layout.addWidget(live_card, 1)
 
     def _build_sticky_action_bar(self) -> None:
         """Create and configure the bottom sticky action bar."""

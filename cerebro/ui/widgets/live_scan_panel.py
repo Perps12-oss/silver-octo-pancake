@@ -271,6 +271,7 @@ class LiveScanPanel(QFrame):
         self._current_file_label = QLabel("—")
         self._current_file_label.setWordWrap(True)
         self._current_file_label.setObjectName("CurrentFileLabel")
+        self._current_file_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         
         file_layout.addWidget(self._current_file_label)
         layout.addWidget(self._current_file_frame)
@@ -292,22 +293,22 @@ class LiveScanPanel(QFrame):
         
         warning_scroll = QScrollArea()
         warning_scroll.setWidgetResizable(True)
-        warning_scroll.setFixedHeight(80)
+        warning_scroll.setMinimumHeight(72)
+        warning_scroll.setMaximumHeight(140)
         warning_scroll.setObjectName("WarningScrollArea")
-        
+
         warning_container = QWidget()
         self._warning_layout = QVBoxLayout(warning_container)
         self._warning_layout.setContentsMargins(8, 8, 8, 8)
         self._warning_layout.setSpacing(4)
-        
+
         self._warning_placeholder = QLabel("No warnings")
         self._warning_placeholder.setObjectName("WarningPlaceholder")
+        self._warning_placeholder.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._warning_layout.addWidget(self._warning_placeholder)
-        
+
         warning_scroll.setWidget(warning_container)
         layout.addWidget(warning_scroll)
-        
-        layout.addStretch()
 
     def _on_live_blink(self) -> None:
         """Toggle live indicator dot for animation."""
@@ -425,7 +426,12 @@ class LiveScanPanel(QFrame):
                 padding: 2px 0px;
             }}
         """)
-    
+
+    def refresh_theme(self) -> None:
+        """Re-apply theme so panel colors update on light/dark switch."""
+        self._apply_theme()
+        self.update()
+
     # ------------------------------------------------------------------------
     # Public API - Single update method from snapshot (Preferred)
     # ------------------------------------------------------------------------
@@ -516,6 +522,7 @@ class LiveScanPanel(QFrame):
                 warning_label = QLabel(warning)
                 warning_label.setObjectName("WarningLabel")
                 warning_label.setWordWrap(True)
+                warning_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
                 self._warning_layout.addWidget(warning_label)
         else:
             self._warning_placeholder.show()
@@ -566,8 +573,9 @@ class LiveScanPanel(QFrame):
             self._warning_placeholder.hide()
         
         warning_label = QLabel(message)
-        warning_label.setObjectName("WarningLabel") # Use same style
+        warning_label.setObjectName("WarningLabel")  # Use same style
         warning_label.setWordWrap(True)
+        warning_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._warning_layout.addWidget(warning_label)
 
     def reset(self) -> None:
