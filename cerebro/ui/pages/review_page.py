@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
     QStackedWidget, QSizePolicy, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QMessageBox, QInputDialog,
     QProgressBar, QTextEdit, QGroupBox, QToolButton,
-    QGraphicsDropShadowEffect, QApplication
+    QGraphicsDropShadowEffect, QApplication, QLineEdit, QRadioButton
 )
 
 from cerebro.ui.pages.base_station import BaseStation
@@ -368,6 +368,177 @@ class CleanupProgressDialog(QDialog):
         if event.key() == Qt.Key_Escape and self.processed_files < self.total_files:
             return
         super().keyPressEvent(event)
+
+
+# ==============================================================================
+# ENHANCED CONFIRM DELETE DIALOG  (Parts 4 + 5)
+# ==============================================================================
+
+class _ConfirmDeleteDialog(QDialog):
+    """
+    Confirmation dialog for file deletion.
+    Offers Recycle Bin (default) vs Permanent delete.
+    Permanent delete requires the user to type DELETE.
+    """
+    MODE_TRASH = "trash"
+    MODE_PERMANENT = "permanent"
+
+    def __init__(self, file_count: int, total_bytes: int, blocked_count: int = 0, parent=None):
+        super().__init__(parent)
+        self._mode = self.MODE_TRASH
+        self._accepted = False
+        self._build(file_count, total_bytes, blocked_count)
+        self.apply_theme()
+        if parent:
+            geo = parent.geometry()
+            self.move(geo.center().x() - 250, geo.center().y() - 195)
+
+    @property
+    def chosen_mode(self) -> str:
+        return self._mode
+
+    @property
+    def accepted_result(self) -> bool:
+        return self._accepted
+
+    def _build(self, file_count: int, total_bytes: int, blocked_count: int):
+        self.setWindowTitle("Confirm Deletion")
+        self.setModal(True)
+        self.setFixedSize(500, 390)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(32, 28, 32, 28)
+        layout.setSpacing(16)
+
+        title = QLabel("🗑️  Confirm Deletion")
+        title.setStyleSheet("font-size: 20px; font-weight: bold;")
+        layout.addWidget(title)
+
+        size_str = format_bytes(total_bytes)
+        summary = QLabel(f"You are about to delete <b>{file_count}</b> file(s)  ·  <b>{size_str}</b>")
+        summary.setTextFormat(Qt.RichText)
+        summary.setStyleSheet("font-size: 14px;")
+        layout.addWidget(summary)
+
+        if blocked_count > 0:
+            warn = QLabel(
+                f"ℹ️  {blocked_count} item(s) excluded by the keep-at-least-one-copy safety rule."
+            )
+            warn.setWordWrap(True)
+            warn.setStyleSheet("color: #f59e0b; font-size: 12px;")
+            layout.addWidget(warn)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet("border: none; border-top: 1px solid rgba(255,255,255,0.1);")
+        layout.addWidget(sep)
+
+        mode_lbl = QLabel("Choose deletion method:")
+        mode_lbl.setStyleSheet("font-weight: bold; margin-top: 4px;")
+        layout.addWidget(mode_lbl)
+
+        self._trash_rb = QRadioButton("♻️  Move to Recycle Bin  (recommended — files can be restored)")
+        self._trash_rb.setChecked(True)
+        self._trash_rb.setStyleSheet("font-size: 13px; padding: 4px;")
+        self._perm_rb = QRadioButton("⚠️  Delete permanently  (cannot be undone)")
+        self._perm_rb.setStyleSheet("font-size: 13px; padding: 4px; color: #ef4444;")
+        layout.addWidget(self._trash_rb)
+        layout.addWidget(self._perm_rb)
+
+        self._confirm_widget = QWidget()
+        confirm_layout = QVBoxLayout(self._confirm_widget)
+        confirm_layout.setContentsMargins(0, 4, 0, 0)
+        confirm_layout.setSpacing(6)
+        conf_lbl = QLabel('Type <b>DELETE</b> to confirm permanent deletion:')
+        conf_lbl.setTextFormat(Qt.RichText)
+        conf_lbl.setStyleSheet("color: #ef4444; font-size: 12px;")
+        self._confirm_edit = QLineEdit()
+        self._confirm_edit.setFixedHeight(36)
+        self._confirm_edit.setPlaceholderText("DELETE")
+        confirm_layout.addWidget(conf_lbl)
+        confirm_layout.addWidget(self._confirm_edit)
+        self._confirm_widget.setVisible(False)
+        layout.addWidget(self._confirm_widget)
+
+        layout.addStretch()
+
+        btn_row = QHBoxLayout()
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.setFixedHeight(40)
+        self._cancel_btn.setCursor(Qt.PointingHandCursor)
+        self._cancel_btn.clicked.connect(self.reject)
+        self._delete_btn = QPushButton("Move to Recycle Bin")
+        self._delete_btn.setFixedHeight(44)
+        self._delete_btn.setMinimumWidth(180)
+        self._delete_btn.setCursor(Qt.PointingHandCursor)
+        self._delete_btn.clicked.connect(self._on_confirm)
+        btn_row.addWidget(self._cancel_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(self._delete_btn)
+        layout.addLayout(btn_row)
+
+        self._trash_rb.toggled.connect(self._on_mode_toggled)
+
+    def _on_mode_toggled(self, trash_checked: bool):
+        perm = not trash_checked
+        self._confirm_widget.setVisible(perm)
+        if perm:
+            self._mode = self.MODE_PERMANENT
+            self._delete_btn.setText("Delete Permanently")
+            self._delete_btn.setStyleSheet(
+                "QPushButton { background: #dc2626; color: white; border-radius: 8px; "
+                "font-weight: bold; padding: 8px 20px; }"
+                "QPushButton:hover { background: #b91c1c; }"
+            )
+        else:
+            self._mode = self.MODE_TRASH
+            self._delete_btn.setText("Move to Recycle Bin")
+            self._delete_btn.setStyleSheet("")
+
+    def _on_confirm(self):
+        if self._mode == self.MODE_PERMANENT:
+            if self._confirm_edit.text().strip() != "DELETE":
+                QMessageBox.warning(
+                    self, "Confirmation required",
+                    'Please type DELETE (uppercase) to confirm permanent deletion.'
+                )
+                return
+        self._accepted = True
+        self.accept()
+
+    def apply_theme(self):
+        from cerebro.ui.theme_engine import current_colors
+        c = current_colors()
+        panel = c.get("panel", "#1a1d26")
+        text = c.get("text", "#e7ecf2")
+        accent = c.get("accent", "#00C4B4")
+        line = c.get("line", "#2a3241")
+        self.setStyleSheet(f"""
+            QDialog {{
+                background: {panel};
+                border: 2px solid {line};
+                border-radius: 16px;
+            }}
+            QLabel {{ color: {text}; }}
+            QRadioButton {{ color: {text}; }}
+            QLineEdit {{
+                background: rgba(255,255,255,0.05);
+                border: 1px solid {line};
+                border-radius: 6px;
+                color: {text};
+                padding: 4px 8px;
+            }}
+            QPushButton {{
+                background: {accent};
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 8px 20px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{ opacity: 0.9; }}
+            QPushButton:disabled {{ background: #4b5563; color: #9ca3af; }}
+        """)
 
 
 # ==============================================================================
@@ -779,7 +950,20 @@ class ReviewPage(BaseStation):
         self.status_bar = self._build_status_bar()
         root.addWidget(self.status_bar)
 
-        # Floating delete button
+        self._scaffold.set_content(content_wrapper)
+
+        self._sticky = StickyActionBar()
+        self._sticky.set_summary("Select files to delete, then press Delete", "")
+        self._sticky.set_primary_text("🗑️ Delete Selected (0)")
+        self._sticky.set_primary_enabled(False)
+        self._sticky.set_secondary_text("Export List")
+        self._sticky.primary_clicked.connect(self._open_ceremony)
+        self._sticky.secondary_clicked.connect(self._on_export_list)
+        self._scaffold.set_sticky_action(self._sticky)
+
+        root.addWidget(self._scaffold, 1)
+
+        # Floating delete button (Gemini teal accent style)
         self.floating_delete = FloatingDeleteButton(self)
         self.floating_delete.clicked_with_count.connect(self._on_floating_delete_clicked)
 
@@ -1200,8 +1384,28 @@ class ReviewPage(BaseStation):
         self.left_summary.setText(f"Showing {total_groups} of {len(self._all_groups)} groups")
         self.status_text.setText(f"{delete_count} files marked for deletion")
         self.selection_stats.setText(f"{delete_count} files selected for deletion ({format_bytes(delete_size)})")
-
-        self.floating_delete.update_count(delete_count, delete_size)
+        if hasattr(self, "floating_delete") and self.floating_delete is not None:
+            self.floating_delete.update_count(delete_count, delete_size)
+            self.floating_delete.setEnabled(delete_count > 0)
+            self.floating_delete.update()
+            self.floating_delete.repaint()
+        safe_count = total_files - delete_count
+        if hasattr(self, "smart_select_fab"):
+            self.smart_select_fab.setText(f"Smart Select\n{safe_count} safe")
+        # Sync large sticky delete button (Part 7)
+        if hasattr(self, "_sticky") and self._sticky is not None:
+            try:
+                label = f"🗑️ Delete Selected ({delete_count})" if delete_count > 0 else "🗑️ Delete Selected (0)"
+                self._sticky.set_primary_text(label)
+                self._sticky.set_primary_enabled(delete_count > 0)
+                summary_text = (
+                    f"{delete_count} file(s) selected  ·  {format_bytes(delete_size)}"
+                    if delete_count > 0
+                    else "Select files above to delete"
+                )
+                self._sticky.set_summary(summary_text, "")
+            except Exception:
+                pass
 
     def _prev_file_in_table(self):
         current = self.file_table.currentRow()
@@ -1371,21 +1575,54 @@ class ReviewPage(BaseStation):
         self._open_ceremony()
 
     def _open_ceremony(self):
+        # --- PART 1 debug: log trigger ---
+        try:
+            from cerebro.services.logger import log_debug
+            log_debug("[DEBUG] ReviewPage._open_ceremony triggered")
+        except Exception:
+            pass
+
         delete_groups = []
         total_delete_size = 0
+        skipped_groups = 0
 
-        for g in self._filtered_groups:
+        for idx, g in enumerate(self._filtered_groups):
             keep_map = self._keep_states.get(g.group_id, {})
-            delete_paths = [p for p in g.paths if not keep_map.get(p, True)]
+            kept_paths = [p for p in g.paths if keep_map.get(_norm_path(p), True)]
+            delete_paths = [p for p in g.paths if not keep_map.get(_norm_path(p), True)]
 
-            if delete_paths:
-                group_size = sum(os.path.getsize(p) for p in delete_paths if os.path.exists(p))
-                total_delete_size += group_size
-                delete_groups.append({
-                    "paths": delete_paths,
-                    "hint": g.hint,
-                    "recoverable_bytes": group_size,
-                })
+            if not delete_paths:
+                continue
+            # Pipeline requires exactly one "keep" per group
+            keep_path = kept_paths[0] if kept_paths else g.paths[0]
+            keep_path = str(keep_path) if keep_path else ""
+            delete_paths_str = [str(p) for p in delete_paths if p]
+            if not keep_path or not os.path.exists(keep_path):
+                skipped_groups += 1
+                try:
+                    from cerebro.services.logger import log_debug
+                    log_debug(f"[DEBUG] _open_ceremony: skipping group {idx} — keep_path missing: {keep_path!r}")
+                except Exception:
+                    pass
+                continue
+            group_size = sum(os.path.getsize(p) for p in delete_paths if os.path.exists(p))
+            total_delete_size += group_size
+            delete_groups.append({
+                "group_index": idx,
+                "keep": keep_path,
+                "delete": delete_paths_str,
+                "hint": g.hint,
+                "recoverable_bytes": group_size,
+            })
+
+        try:
+            from cerebro.services.logger import log_debug
+            log_debug(
+                f"[DEBUG] _open_ceremony: delete_groups={len(delete_groups)} "
+                f"skipped={skipped_groups} total_bytes={total_delete_size}"
+            )
+        except Exception:
+            pass
 
         if not delete_groups:
             QMessageBox.information(
@@ -1396,19 +1633,20 @@ class ReviewPage(BaseStation):
             )
             return
 
-        total_files = sum(len(g["paths"]) for g in delete_groups)
+        total_files = sum(len(g["delete"]) for g in delete_groups)
 
-        reply = QMessageBox.question(
-            self,
-            "Confirm Deletion",
-            f"Move {total_files} files to Trash?\n"
-            f"This will free {format_bytes(total_delete_size)} of space.\n\n"
-            f"You can restore from Trash if needed.",
-            QMessageBox.Yes | QMessageBox.No,
-        )
-
-        if reply != QMessageBox.Yes:
+        # --- PART 4: Enhanced confirmation dialog ---
+        dlg = _ConfirmDeleteDialog(total_files, total_delete_size, blocked_count=skipped_groups, parent=self)
+        if dlg.exec() != QDialog.Accepted or not dlg.accepted_result:
             return
+
+        chosen_mode = dlg.chosen_mode
+
+        try:
+            from cerebro.services.logger import log_debug
+            log_debug(f"[DEBUG] _open_ceremony: confirmed mode={chosen_mode} total_files={total_files}")
+        except Exception:
+            pass
 
         self._progress_dialog = CleanupProgressDialog(total_files, self)
         self._progress_dialog.cancelled.connect(self._on_cleanup_cancelled)
@@ -1420,11 +1658,69 @@ class ReviewPage(BaseStation):
             "recoverable_bytes": total_delete_size,
         }
 
-        cleanup_data = {"groups": delete_groups, "stats": stats}
+        cleanup_data = {
+            "groups": delete_groups,
+            "stats": stats,
+            "policy": {"mode": chosen_mode},
+            "source": "review_page",
+        }
         self.cleanup_confirmed.emit(cleanup_data)
 
     def _on_cleanup_cancelled(self):
         self._bus.notify("Cleanup Cancelled", "File deletion was cancelled", 2000)
+
+    def refresh_after_deletion(self, deleted_paths) -> None:
+        """
+        Part 5: Remove successfully deleted files from all groups and refresh the UI.
+        Called by MainWindow after PipelineCleanupWorker finishes.
+        """
+        try:
+            from cerebro.services.logger import log_debug
+            log_debug(f"[DEBUG] ReviewPage.refresh_after_deletion: {len(deleted_paths or [])} paths")
+        except Exception:
+            pass
+
+        deleted_norm = {_norm_path(str(p)) for p in (deleted_paths or [])}
+        if not deleted_norm:
+            return
+
+        new_all_groups: List[GroupData] = []
+        for g in self._all_groups:
+            remaining = [p for p in g.paths if _norm_path(str(p)) not in deleted_norm]
+            if len(remaining) >= 2:
+                new_group = GroupData(
+                    paths=remaining,
+                    hint=g.hint,
+                    recoverable_bytes=_compute_group_size(remaining),
+                    similarity=g.similarity,
+                    group_id=g.group_id,
+                )
+                new_all_groups.append(new_group)
+                # Prune keep_states: remove entries for deleted paths
+                old_map = self._keep_states.get(g.group_id, {})
+                new_map = {k: v for k, v in old_map.items() if k not in deleted_norm}
+                # Guarantee at least one kept
+                if new_map and not any(v for v in new_map.values()):
+                    first_key = next(iter(new_map))
+                    new_map[first_key] = True
+                self._keep_states[g.group_id] = new_map
+            else:
+                # Group dissolved — clean up keep_states
+                self._keep_states.pop(g.group_id, None)
+
+        self._all_groups = new_all_groups
+        self._apply_filter()
+        if self._filtered_groups:
+            self._current_group_idx = max(
+                0, min(self._current_group_idx, len(self._filtered_groups) - 1)
+            )
+        else:
+            self._current_group_idx = -1
+
+        self._populate_group_list()
+        self._update_display()
+        self._update_stats()
+        self._refresh_delete_button()
 
     def apply_theme(self):
         c = ThemeHelper.colors()

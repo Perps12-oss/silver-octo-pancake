@@ -259,46 +259,122 @@ class ScanPage(BaseStation):
         parent_layout.addWidget(self._folder_picker)
 
     def _build_scan_filters(self, parent_layout: QVBoxLayout) -> None:
-        """Add media type, engine, and scanner tier selectors."""
-        filter_row = QHBoxLayout()
-        filter_row.setSpacing(LayoutMetrics.PAGE_SPACING)
+        """Add Simple/Advanced mode toggle + scan options."""
+        from PySide6.QtWidgets import QButtonGroup
 
-        filter_row.addWidget(QLabel("Scan type:"))
-        self._media_type_combo = QComboBox()
-        self._media_type_combo.addItems(["All", "Photos only", "Videos only", "Audio only"])
-        self._media_type_combo.setCurrentIndex(0)
-        self._media_type_combo.setToolTip("Limit scan to specific media types")
-        filter_row.addWidget(self._media_type_combo, 1)
+        # --- Simple / Advanced mode toggle ---
+        toggle_row = QHBoxLayout()
+        toggle_row.setSpacing(0)
 
-        filter_row.addWidget(QLabel("Engine:"))
-        self._engine_combo = QComboBox()
-        self._engine_combo.addItems(["Simple", "Advanced"])
-        self._engine_combo.setCurrentIndex(0)
-        self._engine_combo.setToolTip("Simple: fast, balanced. Advanced: more workers, thorough.")
-        filter_row.addWidget(self._engine_combo, 1)
+        accent = theme_token("accent")
+        panel = theme_token("panel")
+        line = theme_token("line")
+        text = theme_token("text")
 
-        parent_layout.addLayout(filter_row)
-        
-        # Scanner tier selector (new row)
+        toggle_style_active = (
+            f"QPushButton {{ background: {accent}; color: white; border-radius: 8px; "
+            f"padding: 6px 20px; font-weight: bold; border: none; }}"
+        )
+        toggle_style_inactive = (
+            f"QPushButton {{ background: {panel}; color: {text}; border-radius: 8px; "
+            f"padding: 6px 20px; font-weight: normal; border: 1px solid {line}; }}"
+        )
+
+        self._simple_btn = QPushButton("Simple")
+        self._simple_btn.setCheckable(True)
+        self._simple_btn.setChecked(True)
+        self._simple_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._simple_btn.setToolTip("Simple mode: pick a folder and scan. Best defaults applied automatically.")
+
+        self._advanced_btn = QPushButton("Advanced")
+        self._advanced_btn.setCheckable(True)
+        self._advanced_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._advanced_btn.setToolTip("Advanced mode: expose all scan options (media type, engine, scanner tier).")
+
+        self._toggle_group = QButtonGroup(self)
+        self._toggle_group.setExclusive(True)
+        self._toggle_group.addButton(self._simple_btn, 0)
+        self._toggle_group.addButton(self._advanced_btn, 1)
+
+        def _refresh_toggle_styles():
+            self._simple_btn.setStyleSheet(toggle_style_active if self._simple_btn.isChecked() else toggle_style_inactive)
+            self._advanced_btn.setStyleSheet(toggle_style_active if self._advanced_btn.isChecked() else toggle_style_inactive)
+
+        self._simple_btn.toggled.connect(lambda checked: (self._on_ui_mode_changed("simple") if checked else None) or _refresh_toggle_styles())
+        self._advanced_btn.toggled.connect(lambda checked: (self._on_ui_mode_changed("advanced") if checked else None) or _refresh_toggle_styles())
+
+        _refresh_toggle_styles()
+
+        mode_label = QLabel("Mode:")
+        mode_label.setStyleSheet(f"color: {text}; font-weight: bold;")
+        toggle_row.addWidget(mode_label)
+        toggle_row.addSpacing(8)
+        toggle_row.addWidget(self._simple_btn)
+        toggle_row.addSpacing(4)
+        toggle_row.addWidget(self._advanced_btn)
+        toggle_row.addStretch()
+        parent_layout.addLayout(toggle_row)
+
+        # --- Scanner tier (always visible) ---
         scanner_row = QHBoxLayout()
         scanner_row.setSpacing(LayoutMetrics.PAGE_SPACING)
-        
-        scanner_row.addWidget(QLabel("🚀 Scanner:"))
+        scanner_row.addWidget(QLabel("Scanner:"))
         self._scanner_tier_combo = QComboBox()
         self._scanner_tier_combo.addItems([
             "Turbo (12x faster - Production)",
             "Ultra (60x faster - Extreme)",
             "Quantum (180x+ faster - GPU/Experimental)"
         ])
-        self._scanner_tier_combo.setCurrentIndex(0)  # Default to Turbo
+        self._scanner_tier_combo.setCurrentIndex(0)
         self._scanner_tier_combo.setToolTip(
             "Turbo: Production-ready, 12x faster (no extra deps)\n"
             "Ultra: Extreme performance, 60x faster (requires: pip install xxhash mmh3 numpy)\n"
             "Quantum: Bleeding edge, 180x+ faster (requires GPU + pip install cupy-cuda12x torch)"
         )
         scanner_row.addWidget(self._scanner_tier_combo, 1)
-        
         parent_layout.addLayout(scanner_row)
+
+        # --- Advanced options container (hidden in Simple mode) ---
+        self._advanced_options = QWidget()
+        adv_layout = QVBoxLayout(self._advanced_options)
+        adv_layout.setContentsMargins(0, 0, 0, 0)
+        adv_layout.setSpacing(LayoutMetrics.PAGE_SPACING)
+
+        filter_row = QHBoxLayout()
+        filter_row.setSpacing(LayoutMetrics.PAGE_SPACING)
+        filter_row.addWidget(QLabel("Scan type:"))
+        self._media_type_combo = QComboBox()
+        self._media_type_combo.setMinimumWidth(LayoutMetrics.COMBO_MIN_WIDTH)
+        self._media_type_combo.setMinimumHeight(LayoutMetrics.BUTTON_MIN_HEIGHT)
+        self._media_type_combo.addItems(["All", "Photos only", "Videos only", "Audio only"])
+        self._media_type_combo.setCurrentIndex(0)
+        self._media_type_combo.setToolTip("Limit scan to specific media types")
+        filter_row.addWidget(self._media_type_combo, 1)
+        filter_row.addWidget(QLabel("Engine:"))
+        self._engine_combo = QComboBox()
+        self._engine_combo.setMinimumWidth(LayoutMetrics.COMBO_MIN_WIDTH)
+        self._engine_combo.setMinimumHeight(LayoutMetrics.BUTTON_MIN_HEIGHT)
+        self._engine_combo.addItems(["Simple", "Advanced"])
+        self._engine_combo.setCurrentIndex(0)
+        self._engine_combo.setToolTip("Simple: fast, balanced. Advanced: more workers, thorough.")
+        filter_row.addWidget(self._engine_combo, 1)
+        adv_layout.addLayout(filter_row)
+
+        self._advanced_options.setVisible(False)
+        parent_layout.addWidget(self._advanced_options)
+
+    def _on_ui_mode_changed(self, mode: str) -> None:
+        """Toggle visibility of advanced options and persist the choice."""
+        is_adv = (mode == "advanced")
+        if hasattr(self, "_advanced_options"):
+            self._advanced_options.setVisible(is_adv)
+        # Persist to bus so choice survives page re-entry
+        try:
+            opts = self._bus.get_scan_options() or {}
+            opts["scan_ui_mode"] = mode
+            self._bus.set_scan_options(opts)
+        except Exception:
+            pass
 
     def _build_prominent_scan_button(self, parent_layout: QVBoxLayout) -> None:
         """Add a large, prominent Start Scan CTA. Configure presets in Settings > Scanning."""
@@ -400,6 +476,11 @@ class ScanPage(BaseStation):
         # Scanner tier selection change
         if hasattr(self, "_scanner_tier_combo"):
             self._scanner_tier_combo.currentIndexChanged.connect(self._on_scanner_tier_changed)
+        # Advanced options toggle (in case toggled before signal was connected)
+        if hasattr(self, "_advanced_options"):
+            opts = self._bus.get_scan_options() or {}
+            is_adv = (opts.get("scan_ui_mode", "simple") == "advanced")
+            self._advanced_options.setVisible(is_adv)
 
     # -------------------------------------------------------------------------
     # Snapshot handling (single source of truth)
@@ -470,6 +551,11 @@ class ScanPage(BaseStation):
             self._engine_combo.setEnabled(state.options_enabled)
         if getattr(self, "_scanner_tier_combo", None) is not None:
             self._scanner_tier_combo.setEnabled(state.options_enabled)
+        # Disable mode toggle while scanning
+        if getattr(self, "_simple_btn", None) is not None:
+            self._simple_btn.setEnabled(state.options_enabled)
+        if getattr(self, "_advanced_btn", None) is not None:
+            self._advanced_btn.setEnabled(state.options_enabled)
 
     def _publish_to_bus(self, snapshot: LiveScanSnapshot) -> None:
         """Push snapshot data to the global state bus (backward compatible)."""
@@ -734,8 +820,35 @@ class ScanPage(BaseStation):
         return
 
     def on_enter(self) -> None:
-        """Called when page is shown – no action needed."""
-        return
+        """Sync scanner tier and UI mode from global toolbar/bus when page is shown."""
+        try:
+            opts = self._bus.get_scan_options() or {}
+            # Restore scanner tier
+            tier = (opts.get("scanner_tier") or "turbo").lower()
+            idx = {"turbo": 0, "ultra": 1, "quantum": 2}.get(tier, 0)
+            if getattr(self, "_scanner_tier_combo", None) is not None:
+                self._scanner_tier_combo.blockSignals(True)
+                self._scanner_tier_combo.setCurrentIndex(idx)
+                self._scanner_tier_combo.blockSignals(False)
+            # Restore Simple/Advanced mode
+            scan_ui_mode = (opts.get("scan_ui_mode") or "simple").lower()
+            if hasattr(self, "_simple_btn") and hasattr(self, "_advanced_btn"):
+                self._simple_btn.blockSignals(True)
+                self._advanced_btn.blockSignals(True)
+                if scan_ui_mode == "advanced":
+                    self._advanced_btn.setChecked(True)
+                    self._simple_btn.setChecked(False)
+                    if hasattr(self, "_advanced_options"):
+                        self._advanced_options.setVisible(True)
+                else:
+                    self._simple_btn.setChecked(True)
+                    self._advanced_btn.setChecked(False)
+                    if hasattr(self, "_advanced_options"):
+                        self._advanced_options.setVisible(False)
+                self._simple_btn.blockSignals(False)
+                self._advanced_btn.blockSignals(False)
+        except Exception:
+            pass
 
     def cleanup(self) -> None:
         """Safely stop any running scan and disconnect signals."""
