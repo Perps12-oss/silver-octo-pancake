@@ -45,9 +45,9 @@ from cerebro.ui.widgets.scan_options_panel import ScanOptionsPanel
 # ============================================================================
 
 # Page layout (generous for readability)
-PAGE_MARGIN = 24
-PAGE_SPACING = 18
-CARD_PADDING = 16
+PAGE_MARGIN = 12
+PAGE_SPACING = 10
+CARD_PADDING = 10
 CARD_SPACING = 12
 GROUP_SPACING = 10
 GRID_SPACING = 16

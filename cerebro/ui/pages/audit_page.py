@@ -40,9 +40,9 @@ from cerebro.ui.state_bus import get_state_bus
 # ============================================================================
 
 # Page layout
-PAGE_MARGIN = 18
-PAGE_SPACING = 12
-CARD_PADDING = 14
+PAGE_MARGIN = 12
+PAGE_SPACING = 8
+CARD_PADDING = 10
 CARD_SPACING = 10
 GRID_SPACING = 12
 
@@ -626,7 +626,7 @@ class AuditConsole(QGroupBox):
         # Console text area
         self._console = QTextEdit()
         self._console.setReadOnly(True)
-        self._console.setMinimumHeight(200)
+        self._console.setMinimumHeight(160)
         self._console.setPlaceholderText("Audit results will appear here...")
         
         # Progress bar

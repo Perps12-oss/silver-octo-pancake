@@ -195,8 +195,8 @@ class LiveScanPanel(QFrame):
     def _build_ui(self) -> None:
         """Build the UI layout."""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
         
         # Header with phase and live indicator
         header = QHBoxLayout()
@@ -223,7 +223,7 @@ class LiveScanPanel(QFrame):
         # Progress bar
         self._progress_bar = QProgressBar()
         self._progress_bar.setTextVisible(False)
-        self._progress_bar.setFixedHeight(6)
+        self._progress_bar.setFixedHeight(4)
         self._progress_bar.setObjectName("ProgressBar") # For stylesheet
         layout.addWidget(self._progress_bar)
         
@@ -244,7 +244,7 @@ class LiveScanPanel(QFrame):
         self._advanced_details_section.setObjectName("AdvancedDetailsSection")
         adv_layout = QVBoxLayout(self._advanced_details_section)
         adv_layout.setContentsMargins(0, 0, 0, 0)
-        adv_layout.setSpacing(12)
+        adv_layout.setSpacing(8)
         
         # Statistics grid
         stats_grid = QGridLayout()
@@ -275,7 +275,7 @@ class LiveScanPanel(QFrame):
         self._current_file_frame.setObjectName("CurrentFileFrame")
         
         file_layout = QVBoxLayout(self._current_file_frame)
-        file_layout.setContentsMargins(10, 8, 10, 8)
+        file_layout.setContentsMargins(8, 6, 8, 6)
         
         self._current_file_label = QLabel("—")
         self._current_file_label.setWordWrap(True)
@@ -290,7 +290,7 @@ class LiveScanPanel(QFrame):
         
         warning_scroll = QScrollArea()
         warning_scroll.setWidgetResizable(True)
-        warning_scroll.setMinimumHeight(72)
+        warning_scroll.setMinimumHeight(56)
         warning_scroll.setMaximumHeight(140)
         warning_scroll.setObjectName("WarningScrollArea")
 
@@ -345,7 +345,7 @@ class LiveScanPanel(QFrame):
         frame.setObjectName("ResultFrame")
         
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setContentsMargins(8, 6, 8, 6)
         
         layout.addWidget(QLabel(title))
         value_label = QLabel(value)

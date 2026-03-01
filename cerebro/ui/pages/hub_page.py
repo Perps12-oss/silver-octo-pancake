@@ -42,9 +42,9 @@ from cerebro.ui.state_bus import get_state_bus
 # ============================================================================
 
 # Page layout
-PAGE_MARGIN = 18
-PAGE_SPACING = 12
-CARD_PADDING = 14
+PAGE_MARGIN = 12
+PAGE_SPACING = 8
+CARD_PADDING = 10
 CARD_SPACING = 10
 GRID_SPACING = 12
 
@@ -422,7 +422,7 @@ class LogViewer(QGroupBox):
         # Log text area
         self._log_text = QTextEdit()
         self._log_text.setReadOnly(True)
-        self._log_text.setMinimumHeight(300)
+        self._log_text.setMinimumHeight(200)
         
         # Action buttons
         actions = QHBoxLayout()

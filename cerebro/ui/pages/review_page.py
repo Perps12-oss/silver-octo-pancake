@@ -287,12 +287,12 @@ class CleanupProgressDialog(QDialog):
 
     def _build(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(20)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
 
         self.title = QLabel("🗑️ Moving to Trash...")
         self.title.setAlignment(Qt.AlignCenter)
-        self.title.setStyleSheet("font-size: 24px; font-weight: bold;")
+        self.title.setStyleSheet("font-size: 18px; font-weight: bold;")
         layout.addWidget(self.title)
 
         self.subtitle = QLabel(f"Processing {self.total_files} files")
@@ -305,7 +305,7 @@ class CleanupProgressDialog(QDialog):
         self.progress.setValue(0)
         self.progress.setTextVisible(True)
         self.progress.setFormat("%v/%m files (%p%)")
-        self.progress.setFixedHeight(30)
+        self.progress.setFixedHeight(24)
         layout.addWidget(self.progress)
 
         stats = QHBoxLayout()
@@ -327,7 +327,7 @@ class CleanupProgressDialog(QDialog):
         layout.addStretch()
 
         self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.setFixedHeight(40)
+        self.cancel_btn.setFixedHeight(34)
         self.cancel_btn.setCursor(Qt.PointingHandCursor)
         self.cancel_btn.clicked.connect(self._on_cancel)
         layout.addWidget(self.cancel_btn)
@@ -747,15 +747,15 @@ class GroupListItem(QFrame):
 
         self.setObjectName("GroupListItem")
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedHeight(64)
+        self.setFixedHeight(52)
 
         self._build()
         self.update_style()
 
     def _build(self):
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(12)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(8)
 
         self.checkbox = QCheckBox()
         self.checkbox.setTristate(True)
@@ -766,7 +766,7 @@ class GroupListItem(QFrame):
         layout.addWidget(self.checkbox)
 
         icon = QLabel(file_emoji(self.group_data.paths[0]) if self.group_data.paths else "📄")
-        icon.setFixedSize(40, 40)
+        icon.setFixedSize(32, 32)
         icon.setAlignment(Qt.AlignCenter)
         icon.setStyleSheet("font-size: 20px; background: rgba(255,255,255,0.1); border-radius: 8px;")
         layout.addWidget(icon)
@@ -926,7 +926,7 @@ class ReviewPage(BaseStation):
         self._thumb_loader = AsyncThumbnailLoader(self)
 
         self._build_gemini_ui()
-        self.left_panel.setMinimumWidth(260)
+        self.left_panel.setMinimumWidth(200)
         self._setup_keyboard_shortcuts()
         self._wire()
         self.apply_theme()
@@ -944,7 +944,7 @@ class ReviewPage(BaseStation):
         # Prominent large delete button (used in bottom bar)
         self._large_delete_btn = QPushButton("Delete (0)")
         self._large_delete_btn.setObjectName("LargeDeleteButton")
-        self._large_delete_btn.setMinimumSize(180, 48)
+        self._large_delete_btn.setMinimumSize(140, 40)
         self._large_delete_btn.setCursor(Qt.PointingHandCursor)
         self._large_delete_btn.setToolTip("Delete selected files. Routes through confirmation.")
         self._large_delete_btn.clicked.connect(self._open_ceremony)
@@ -964,7 +964,7 @@ class ReviewPage(BaseStation):
 
         content_wrapper = QWidget()
         wrap_layout = QVBoxLayout(content_wrapper)
-        wrap_layout.setContentsMargins(24, 0, 24, 0)
+        wrap_layout.setContentsMargins(12, 0, 12, 0)
         wrap_layout.setSpacing(0)
         card = ContentCard()
         card.set_content(splitter)
@@ -1080,11 +1080,11 @@ class ReviewPage(BaseStation):
     def _build_step_bar(self):
         bar = QFrame()
         bar.setObjectName("StepBar")
-        bar.setFixedHeight(50)
+        bar.setFixedHeight(40)
 
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(24, 10, 24, 10)
-        layout.setSpacing(20)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(12)
 
         acc = theme_token("accent")
         muted = theme_token("muted")
@@ -1126,8 +1126,8 @@ class ReviewPage(BaseStation):
         panel.setMaximumWidth(320)
 
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(12, 16, 12, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(8, 10, 8, 10)
+        layout.setSpacing(8)
 
         # Collapse toggle "Groups"
         self._groups_toggle_btn = QPushButton("Groups ▼")
@@ -1159,8 +1159,8 @@ class ReviewPage(BaseStation):
         filter_layout.setSpacing(8)
         filter_layout.addWidget(QLabel("Filter:"))
         self.filter_combo = QComboBox()
-        self.filter_combo.setMinimumWidth(140)
-        self.filter_combo.setMinimumHeight(32)
+        self.filter_combo.setMinimumWidth(120)
+        self.filter_combo.setMinimumHeight(28)
         self.filter_combo.addItems(["All Files", "Images", "Videos", "Audio", "Archives", "Documents", "Other"])
         self.filter_combo.currentTextChanged.connect(self._on_filter_changed)
         filter_layout.addWidget(self.filter_combo, 1)
@@ -1219,8 +1219,8 @@ class ReviewPage(BaseStation):
         panel.setObjectName("CenterPanel")
 
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(20)
+        layout.setContentsMargins(12, 14, 12, 14)
+        layout.setSpacing(14)
 
         # Slim nav: subtle arrows + group counter (wrapped so we can hide when empty)
         nav_widget = QWidget()
@@ -1228,7 +1228,7 @@ class ReviewPage(BaseStation):
         nav.setContentsMargins(0, 0, 0, 0)
         self.prev_group_btn = QPushButton("◀")
         self.prev_group_btn.setObjectName("NavArrowBtn")
-        self.prev_group_btn.setFixedSize(44, 36)
+        self.prev_group_btn.setFixedSize(36, 30)
         self.prev_group_btn.setCursor(Qt.PointingHandCursor)
         self.prev_group_btn.clicked.connect(self._prev_group)
 
@@ -1238,7 +1238,7 @@ class ReviewPage(BaseStation):
 
         self.next_group_btn = QPushButton("▶")
         self.next_group_btn.setObjectName("NavArrowBtn")
-        self.next_group_btn.setFixedSize(44, 36)
+        self.next_group_btn.setFixedSize(36, 30)
         self.next_group_btn.setCursor(Qt.PointingHandCursor)
         self.next_group_btn.clicked.connect(self._next_group)
 
@@ -1270,7 +1270,7 @@ class ReviewPage(BaseStation):
         self.file_table.setColumnCount(3)
         self.file_table.setHorizontalHeaderLabels(["Delete", "File", "Size"])
         self.file_table.horizontalHeader().setStretchLastSection(True)
-        self.file_table.setMaximumHeight(180)
+        self.file_table.setMaximumHeight(140)
         self.file_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         layout.addWidget(self.file_table)
         self.file_table.setVisible(False)
@@ -1287,7 +1287,7 @@ class ReviewPage(BaseStation):
         self._empty_state_label.setStyleSheet(
             "font-size: 18px; font-weight: 600; color: #00C4B4; padding: 24px;"
         )
-        self._empty_state_label.setMinimumWidth(400)
+        self._empty_state_label.setMinimumWidth(280)
         self._empty_state_container = QWidget()
         empty_layout = QVBoxLayout(self._empty_state_container)
         empty_layout.setContentsMargins(0, 0, 0, 0)
@@ -1351,11 +1351,11 @@ class ReviewPage(BaseStation):
         """Clean bottom bar: status text (stretch) | spacing | Export | Delete | hint. Spacious, premium layout."""
         bar = QFrame()
         bar.setObjectName("StatusBar")
-        bar.setFixedHeight(64)
+        bar.setFixedHeight(52)
 
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(24, 8, 24, 8)
-        layout.setSpacing(24)
+        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setSpacing(12)
 
         self.status_text = QLabel("Ready")
         self.status_text.setStyleSheet(f"font-size: 13px; color: {theme_token('muted')};")
@@ -1369,7 +1369,7 @@ class ReviewPage(BaseStation):
 
         self.export_list_btn = QPushButton("Export List")
         self.export_list_btn.setToolTip("Export current duplicate list to CSV or JSON.")
-        self.export_list_btn.setMinimumSize(180, 48)
+        self.export_list_btn.setMinimumSize(140, 40)
         self.export_list_btn.setCursor(Qt.PointingHandCursor)
         self.export_list_btn.clicked.connect(self._on_export_list)
         layout.addWidget(self.export_list_btn)
@@ -1387,11 +1387,11 @@ class ReviewPage(BaseStation):
         """Non-blocking banner: 'Deleted X files. [Refresh] [Rescan]' — hidden by default."""
         bar = QFrame()
         bar.setObjectName("PostDeleteBanner")
-        bar.setFixedHeight(44)
+        bar.setFixedHeight(36)
         bar.setVisible(False)
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(16, 6, 16, 6)
-        layout.setSpacing(12)
+        layout.setContentsMargins(12, 4, 12, 4)
+        layout.setSpacing(8)
         self._post_delete_label = QLabel("")
         self._post_delete_label.setStyleSheet("font-size: 12px; color: #94a3b8;")
         layout.addWidget(self._post_delete_label)

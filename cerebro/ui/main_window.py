@@ -21,12 +21,12 @@ from __future__ import annotations
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 
-from PySide6.QtCore import QTimer, Qt, QThread, Signal, Slot
+from PySide6.QtCore import QTimer, Qt, QThread, Signal, Slot, QSize
 from PySide6.QtGui import QKeySequence, QShortcut, QAction
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget,
     QMessageBox, QFrame, QLabel, QPushButton, QComboBox, QMenuBar, QMenu,
-    QDialog, QDialogButtonBox
+    QDialog, QDialogButtonBox, QSizePolicy,
 )
 
 from cerebro.services.logger import log_info, log_error, log_debug
@@ -50,11 +50,27 @@ from cerebro.core.pipeline import CerebroPipeline, ExecutableDeletePlan, Deletio
 
 
 class ThemedStack(QStackedWidget):
-    """Stacked widget that propagates theme changes to all children."""
+    """Stacked widget whose size hint never changes when pages switch.
+
+    QStackedWidget normally returns the *current* page's sizeHint, which
+    causes the parent layout (and therefore the window) to resize every
+    time the user navigates. We override sizeHint/minimumSizeHint to
+    return a small constant so the layout gives us all remaining stretch
+    space without ever requesting more.
+    """
+
+    _FIXED_HINT = QSize(200, 200)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setObjectName("pageStack")
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+
+    def sizeHint(self) -> QSize:
+        return self._FIXED_HINT
+
+    def minimumSizeHint(self) -> QSize:
+        return self._FIXED_HINT
 
     def propagate_theme(self) -> None:
         """Force theme refresh on all pages."""
@@ -165,20 +181,12 @@ class MainWindow(QMainWindow):
         self.setObjectName("MainWindow")
         self.setWindowTitle("Cerebro — Gemini Duplicate Finder")
         
-        # Enable window resizing and standard controls (minimize, maximize, close)
-        self.setWindowFlags(
-            Qt.WindowType.Window |                    # Standard window
-            Qt.WindowType.WindowMinMaxButtonsHint |  # Enable min/max buttons
-            Qt.WindowType.WindowCloseButtonHint |    # Enable close button
-            Qt.WindowType.WindowSystemMenuHint       # Enable system menu (context menu on title bar)
-        )
+        # Use default window flags so the OS title bar (min/max/close) is always visible.
+        # Do not set custom WindowFlags that can hide or break native controls on Windows.
         
-        # Set initial size (resizable, not fixed)
-        self.resize(1400, 900)
-        
-        # Set minimum and maximum sizes (reasonable bounds)
-        self.setMinimumSize(800, 600)    # Minimum usable size
-        # Don't set maximum size - let it scale to screen size
+        # Default size and bounds (resizable, no max limit)
+        self.resize(800, 600)
+        self.setMinimumSize(800, 600)
         
         self._bus = get_state_bus()
         self._theme = get_theme_manager()
@@ -245,13 +253,13 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # Global top toolbar (Gemini-style): 24px margins, clean elevated bar
+        # Global toolbar: compact for small window; expands when maximized
         self._toolbar = QFrame()
         self._toolbar.setObjectName("GlobalToolbar")
-        self._toolbar.setFixedHeight(48)
+        self._toolbar.setFixedHeight(36)
         tb_layout = QHBoxLayout(self._toolbar)
-        tb_layout.setContentsMargins(24, 6, 24, 6)
-        tb_layout.setSpacing(12)
+        tb_layout.setContentsMargins(12, 4, 12, 4)
+        tb_layout.setSpacing(8)
         self._scanner_mode_combo = QComboBox()
         self._scanner_mode_combo.setToolTip("Scanner mode: Turbo (12x), Ultra (60x), or Quantum (180x+)")
         self._scanner_mode_combo.addItems([
@@ -268,16 +276,16 @@ class MainWindow(QMainWindow):
             QLabel#ScannerBadge {
                 background: #22c55e;
                 color: white;
-                border-radius: 10px;
-                padding: 2px 8px;
-                font-size: 11px;
+                border-radius: 6px;
+                padding: 1px 6px;
+                font-size: 10px;
                 font-weight: bold;
             }
         """)
         self._scanner_badge.setToolTip("Turbo = green, Ultra = blue, Quantum = purple")
         tb_layout.addWidget(self._scanner_badge)
         self._on_toolbar_scanner_mode_changed(self._scanner_mode_combo.currentIndex())
-        tb_layout.addSpacing(16)
+        tb_layout.addSpacing(8)
         new_scan_btn = QPushButton("New Scan")
         new_scan_btn.setToolTip("Start a new duplicate scan")
         new_scan_btn.clicked.connect(lambda: self.navigate_to("scan"))
@@ -299,8 +307,8 @@ class MainWindow(QMainWindow):
         self._scan_banner.setObjectName("ScanBanner")
         self._scan_banner.setVisible(False)
         banner_layout = QHBoxLayout(self._scan_banner)
-        banner_layout.setContentsMargins(16, 6, 16, 6)
-        banner_layout.setSpacing(8)
+        banner_layout.setContentsMargins(12, 4, 12, 4)
+        banner_layout.setSpacing(6)
 
         self._scan_banner_label = QLabel("Scan running in background…")
         banner_layout.addWidget(self._scan_banner_label, 1)
@@ -537,8 +545,8 @@ class MainWindow(QMainWindow):
         d = QDialog(self)
         d.setWindowTitle("About Cerebro")
         layout = QVBoxLayout(d)
-        layout.setSpacing(16)
-        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(12)
+        layout.setContentsMargins(12, 12, 12, 12)
         title = QLabel("Cerebro — Gemini Duplicate Finder")
         title.setStyleSheet("font-size: 16px; font-weight: bold;")
         layout.addWidget(title)

@@ -136,8 +136,8 @@ class HistoryPage(BaseStation):
 
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(24, 24, 24, 24)
-        content_layout.setSpacing(18)
+        content_layout.setContentsMargins(12, 12, 12, 12)
+        content_layout.setSpacing(12)
         content_layout.addLayout(stat_row)
         content_layout.addWidget(toolbar_wrap)
 

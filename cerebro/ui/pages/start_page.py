@@ -38,14 +38,14 @@ class StartPage(BaseStation):
 
     def _build_gemini_ui(self):
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(0)
 
         # LEFT SIDEBAR — Collapsible Locations (persistent via ui_state)
         self._sidebar_container = QFrame()
         self._sidebar_container.setObjectName("LocationsSidebar")
         self._sidebar_container.setMinimumWidth(0)
-        self._sidebar_container.setMaximumWidth(400)
+        self._sidebar_container.setMaximumWidth(320)
         sb_main = QVBoxLayout(self._sidebar_container)
         sb_main.setContentsMargins(0, 0, 0, 0)
         sb_main.setSpacing(0)
@@ -62,8 +62,8 @@ class StartPage(BaseStation):
         sb_main.addLayout(header)
         self._locations_widget = QWidget()
         sb_inner = QVBoxLayout(self._locations_widget)
-        sb_inner.setContentsMargins(16, 16, 16, 16)
-        sb_inner.setSpacing(12)
+        sb_inner.setContentsMargins(10, 10, 10, 10)
+        sb_inner.setSpacing(8)
         self.locations_list = QListWidget()
         self.locations_list.setToolTip("Double-click a location to scan again. Folder icon = saved location.")
         self.locations_list.itemDoubleClicked.connect(self._on_location_double_clicked)
@@ -89,7 +89,7 @@ class StartPage(BaseStation):
         """)
         hero.setToolTip("Drop folders here to add them for scanning, or click Browse Computer")
         h_layout = QVBoxLayout(hero)
-        h_layout.setContentsMargins(24, 24, 24, 24)
+        h_layout.setContentsMargins(16, 16, 16, 16)
         h_layout.setAlignment(Qt.AlignCenter)
         icon = QLabel("[Folder]")
         icon.setStyleSheet("font-size: 72px; color: #00C4B4;")
@@ -114,7 +114,7 @@ class StartPage(BaseStation):
             self._sidebar_container.setMaximumWidth(56)
             self._sidebar_container.setMinimumWidth(56)
         else:
-            self._sidebar_container.setMaximumWidth(400)
+            self._sidebar_container.setMaximumWidth(320)
             self._sidebar_container.setMinimumWidth(200)
 
     def _on_location_double_clicked(self, item: QListWidgetItem) -> None:

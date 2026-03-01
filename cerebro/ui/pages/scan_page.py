@@ -76,14 +76,14 @@ class NotifyDuration:
 
 
 class LayoutMetrics:
-    """UI layout constants (pixels). Generous spacing for readability (Gemini-like)."""
-    PAGE_MARGIN = 24
-    PAGE_SPACING = 20
-    MIN_LIVE_WIDTH = 420
-    MIN_LIVE_PANEL_HEIGHT = 280  # Bottom progress/warnings area never squashed
-    COMBO_MIN_WIDTH = 180
-    COMBO_LONG_MIN_WIDTH = 300
-    BUTTON_MIN_HEIGHT = 40
+    """UI layout constants (pixels). Compact for small window; content expands when maximized."""
+    PAGE_MARGIN = 12
+    PAGE_SPACING = 12
+    MIN_LIVE_WIDTH = 320
+    MIN_LIVE_PANEL_HEIGHT = 200
+    COMBO_MIN_WIDTH = 140
+    COMBO_LONG_MIN_WIDTH = 220
+    BUTTON_MIN_HEIGHT = 32
 
 
 class StatusText:
@@ -359,7 +359,7 @@ class ScanPage(BaseStation):
         scroll.setWidget(top)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setMinimumHeight(120)
+        scroll.setMinimumHeight(80)
         content_layout.addWidget(scroll, 1)
 
         # Bottom: live scan panel (hidden when complete state is shown)
@@ -392,15 +392,15 @@ class ScanPage(BaseStation):
 
         wrap = QWidget()
         layout = QVBoxLayout(wrap)
-        layout.setContentsMargins(24, 16, 24, 16)
-        layout.setSpacing(16)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(10)
 
         # Slim horizontal success banner: "Scan Complete ✓   •   Xm Ys"
         banner = QFrame()
         banner.setObjectName("ScanCompleteBanner")
-        banner.setFixedHeight(44)
+        banner.setFixedHeight(36)
         banner_layout = QVBoxLayout(banner)
-        banner_layout.setContentsMargins(16, 6, 16, 6)
+        banner_layout.setContentsMargins(12, 4, 12, 4)
         banner_layout.setSpacing(4)
         row1 = QHBoxLayout()
         self._complete_title = QLabel("Scan Complete ✓   •   —")
@@ -412,7 +412,7 @@ class ScanPage(BaseStation):
         self._complete_progress.setMaximum(100)
         self._complete_progress.setValue(100)
         self._complete_progress.setTextVisible(False)
-        self._complete_progress.setFixedHeight(4)
+        self._complete_progress.setFixedHeight(3)
         self._complete_progress.setStyleSheet(f"""
             QProgressBar {{ background: {panel}; border-radius: 2px; }}
             QProgressBar::chunk {{ background: #22c55e; border-radius: 2px; }}
@@ -429,22 +429,22 @@ class ScanPage(BaseStation):
 
         # 4 stat cards in one row — enough height so numbers (e.g. "2.6 GB", "0s") are never clipped
         cards_row = QHBoxLayout()
-        cards_row.setSpacing(12)
-        _card_style = " QLabel#statCardValue { font-size: 20px; font-weight: bold; padding: 4px 0; min-height: 28px; } "
+        cards_row.setSpacing(8)
+        _card_style = " QLabel#statCardValue { font-size: 18px; font-weight: bold; padding: 2px 0; min-height: 22px; } "
         self._complete_card_groups = StatCard("Groups", "0", icon=None)
-        self._complete_card_groups.setMinimumHeight(96)
+        self._complete_card_groups.setMinimumHeight(72)
         self._complete_card_groups.setStyleSheet(self._complete_card_groups.styleSheet() + _card_style)
         cards_row.addWidget(self._complete_card_groups)
         self._complete_card_duplicates = StatCard("Duplicates", "0", icon=None)
-        self._complete_card_duplicates.setMinimumHeight(96)
+        self._complete_card_duplicates.setMinimumHeight(72)
         self._complete_card_duplicates.setStyleSheet(self._complete_card_duplicates.styleSheet() + _card_style)
         cards_row.addWidget(self._complete_card_duplicates)
         self._complete_card_space = StatCard("Space saved", "0 B", icon=None)
-        self._complete_card_space.setMinimumHeight(96)
+        self._complete_card_space.setMinimumHeight(72)
         self._complete_card_space.setStyleSheet(self._complete_card_space.styleSheet() + _card_style)
         cards_row.addWidget(self._complete_card_space)
         self._complete_card_time = StatCard("Time taken", "—", icon=None)
-        self._complete_card_time.setMinimumHeight(96)
+        self._complete_card_time.setMinimumHeight(72)
         self._complete_card_time.setStyleSheet(self._complete_card_time.styleSheet() + _card_style)
         cards_row.addWidget(self._complete_card_time)
         layout.addLayout(cards_row)
@@ -452,7 +452,7 @@ class ScanPage(BaseStation):
         # One huge centered teal CTA
         self._review_duplicates_btn = QPushButton("Review Duplicates")
         self._review_duplicates_btn.setObjectName("ReviewDuplicatesCTA")
-        self._review_duplicates_btn.setMinimumHeight(52)
+        self._review_duplicates_btn.setMinimumHeight(40)
         self._review_duplicates_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._review_duplicates_btn.setStyleSheet(f"""
             QPushButton#ReviewDuplicatesCTA {{
@@ -611,7 +611,7 @@ class ScanPage(BaseStation):
         self._start_scan_btn.setObjectName("ProminentScanButton")
         self._start_scan_btn.setToolTip("Start duplicate scan with selected folder and scanner mode. Live progress and stats appear below.")
         self._start_scan_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._start_scan_btn.setMinimumHeight(64)
+        self._start_scan_btn.setMinimumHeight(44)
         self._start_scan_btn.setStyleSheet(f"""
             QPushButton#ProminentScanButton {{
                 background: {accent};
