@@ -75,21 +75,24 @@ class ThemedStack(QStackedWidget):
 
 class PipelineCleanupWorker(QThread):
     """
-    Background worker that executes a validated ExecutableDeletePlan through the pipeline.
-
-    Important:
-    - Pipeline owns execution + audit.
-    - UI only receives progress and results.
+    Background worker: builds the executable plan (I/O-heavy validation) then
+    executes deletion through the pipeline.  Both phases run off the UI thread.
     """
+    plan_ready = Signal(int)           # total_files (emitted once plan is built)
     progress = Signal(int, int, str)   # current, total, current_file_name
     finished = Signal(object)          # DeletionResult
     error = Signal(str)
     cancelled = Signal()
 
-    def __init__(self, pipeline: CerebroPipeline, plan: ExecutableDeletePlan, parent: Optional[QWidget] = None):
+    def __init__(
+        self,
+        pipeline: CerebroPipeline,
+        deletion_plan_dict: Dict[str, Any],
+        parent: Optional[QWidget] = None,
+    ):
         super().__init__(parent)
         self._pipeline = pipeline
-        self._plan = plan
+        self._plan_dict = deletion_plan_dict
         self._cancel_requested = False
 
     def cancel(self) -> None:
@@ -97,43 +100,37 @@ class PipelineCleanupWorker(QThread):
 
     def run(self) -> None:
         try:
-            # Temporary debug: worker lifecycle logging
-            try:
-                log_debug("[DEBUG] CleanupWorker.run start")
-            except Exception:
-                pass
+            log_debug("[DEBUG] CleanupWorker.run start — building plan off-thread")
+
+            executable_plan = self._pipeline.build_delete_plan(self._plan_dict)
+            self.plan_ready.emit(executable_plan.total_files)
+
+            if self._cancel_requested:
+                self.cancelled.emit()
+                return
+
+            self.progress.emit(0, executable_plan.total_files, "Starting…")
+
+            _last_emit = [0.0]
 
             def progress_cb(current: int, total: int, current_file: str) -> bool:
-                self.progress.emit(current, total, current_file)
+                import time
+                now = time.monotonic()
+                if now - _last_emit[0] >= 0.05 or current >= total:
+                    self.progress.emit(current, total, current_file)
+                    _last_emit[0] = now
                 return not self._cancel_requested
 
-            try:
-                log_debug(
-                    f"[DEBUG] CleanupWorker calling execute_delete_plan ops={len(getattr(self._plan, 'operations', []) )}"
-                )
-            except Exception:
-                pass
-
-            result = self._pipeline.execute_delete_plan(self._plan, progress_cb=progress_cb)
-
-            try:
-                deleted_count = len(getattr(result, "deleted", []))
-                failed_count = len(getattr(result, "failed", []))
-                log_debug(
-                    f"[DEBUG] CleanupWorker execute_delete_plan returned deleted={deleted_count} failed={failed_count}"
-                )
-            except Exception:
-                pass
+            result = self._pipeline.execute_delete_plan(
+                executable_plan, progress_cb=progress_cb,
+            )
 
             if self._cancel_requested:
                 self.cancelled.emit()
                 return
             self.finished.emit(result)
         except Exception as e:
-            try:
-                log_debug(f"[DEBUG] CleanupWorker.run exception: {e}")
-            except Exception:
-                pass
+            log_debug(f"[DEBUG] CleanupWorker.run exception: {e}")
             self.error.emit(str(e))
 
 
@@ -526,44 +523,18 @@ class MainWindow(QMainWindow):
     def _on_cleanup_confirmed(self, payload: Dict[str, Any]) -> None:
         """
         Receive DeletionPlan intent from ReviewPage and execute through pipeline.
-        Pipeline owns validation, execution, and audit write-through.
+        Plan building + execution both run on a background QThread.
         """
         try:
-            # Normalize and validate payload shape (no guessing)
             deletion_plan = self._normalize_deletion_plan(payload)
 
             groups = deletion_plan.get("groups", [])
             mode = str(deletion_plan.get("policy", {}).get("mode", "trash"))
             total_files = sum(len(g.get("delete", []) or []) for g in groups)
 
-            # Temporary debug: log normalized deletion plan summary
-            try:
-                first = groups[0] if groups else {}
-                log_debug(
-                    f"[DEBUG] MainWindow._on_cleanup_confirmed normalized groups={len(groups)} "
-                    f"total_files={total_files} first_keep={first.get('keep')} "
-                    f"first_delete_count={len(first.get('delete', []))}"
-                )
-            except Exception:
-                pass
-
             if total_files <= 0:
                 self._toast.show_toast("Nothing to delete", "No delete candidates were selected.", duration_ms=2200)
                 return
-
-            # Build executable plan (authoritative validation in pipeline)
-            executable_plan = self._pipeline.build_delete_plan(deletion_plan)
-
-            # Temporary debug: log executable plan summary
-            try:
-                log_debug(
-                    f"[DEBUG] MainWindow._on_cleanup_confirmed executable "
-                    f"ops_len={len(getattr(executable_plan, 'operations', []))} "
-                    f"total_files={executable_plan.total_files} "
-                    f"stats_files={getattr(executable_plan, 'stats', {}).get('files')}"
-                )
-            except Exception:
-                pass
 
             # Prevent parallel cleanups
             if self._cleanup_worker is not None:
@@ -575,12 +546,13 @@ class MainWindow(QMainWindow):
 
             self._toast.show_toast(
                 "Cleanup started 🧹",
-                f"Deleting {executable_plan.total_files} file(s) ({mode})…",
+                f"Preparing {total_files} file(s) for {mode}…",
                 duration_ms=1800,
             )
 
-            w = PipelineCleanupWorker(self._pipeline, executable_plan, self)
+            w = PipelineCleanupWorker(self._pipeline, deletion_plan, self)
             self._cleanup_worker = w
+            w.plan_ready.connect(self._on_plan_ready)
             w.progress.connect(self._on_cleanup_progress)
             w.finished.connect(self._on_cleanup_finished)
             w.error.connect(self._on_cleanup_error)
@@ -590,6 +562,12 @@ class MainWindow(QMainWindow):
         except Exception as e:
             log_error(f"[UI] Cleanup start failed: {e}")
             self._toast.show_toast("Cleanup blocked ❌", str(e), duration_ms=4200)
+
+    @Slot(int)
+    def _on_plan_ready(self, total_files: int) -> None:
+        """Plan was built off-thread; update toast with validated file count."""
+        log_debug(f"[DEBUG] Plan validated: {total_files} files ready for deletion")
+        self._bus.publish_station_status("review", is_pulsing=True)
 
     @Slot(int, int, str)
     def _on_cleanup_progress(self, current: int, total: int, current_file: str) -> None:

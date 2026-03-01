@@ -324,7 +324,6 @@ class CleanupProgressDialog(QDialog):
                 border-radius: 13px;
             }
         """)
-        QApplication.processEvents()
 
     def set_complete(self, success_count: int, fail_count: int):
         self.title.setText("✅ Cleanup Complete!")
