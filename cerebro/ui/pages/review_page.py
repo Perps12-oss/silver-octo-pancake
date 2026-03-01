@@ -1194,8 +1194,22 @@ class ReviewPage(BaseStation):
         self.selection_stats.setStyleSheet("font-weight: bold; color: #ef4444;")
         layout.addWidget(self.selection_stats)
 
-        hint = QLabel("Shortcuts: ←→ Navigate | Space Toggle | Delete Confirm | 1-5 Keep")
-        hint.setStyleSheet("font-size: 10px; color: #666; margin-left: 20px;")
+        self._refresh_btn = QPushButton("Refresh")
+        self._refresh_btn.setToolTip("Re-check which files still exist and update the view")
+        self._refresh_btn.setFixedHeight(26)
+        self._refresh_btn.setCursor(Qt.PointingHandCursor)
+        self._refresh_btn.clicked.connect(self._reconcile_exists)
+        layout.addWidget(self._refresh_btn)
+
+        self._rescan_btn = QPushButton("Rescan")
+        self._rescan_btn.setToolTip("Re-run the last scan with the same settings")
+        self._rescan_btn.setFixedHeight(26)
+        self._rescan_btn.setCursor(Qt.PointingHandCursor)
+        self._rescan_btn.clicked.connect(self._trigger_rescan)
+        layout.addWidget(self._rescan_btn)
+
+        hint = QLabel("←→ Nav | Space Toggle | 1-5 Keep")
+        hint.setStyleSheet("font-size: 10px; color: #666; margin-left: 12px;")
         layout.addWidget(hint)
 
         return bar
@@ -1373,14 +1387,14 @@ class ReviewPage(BaseStation):
 
         delete_count = 0
         delete_size = 0
-        for g in self._filtered_groups:
+        for g in self._all_groups:
             keep_map = self._keep_states.get(g.group_id, {})
             for p in g.paths:
                 if not keep_map.get(p, True):
                     delete_count += 1
                     try:
                         delete_size += os.path.getsize(p)
-                    except:
+                    except OSError:
                         pass
 
         self.quick_stats.setText(f"{total_groups} groups • {total_files} files • {format_bytes(total_size)}")
@@ -1574,6 +1588,48 @@ class ReviewPage(BaseStation):
             2000
         )
 
+    def _reconcile_exists(self):
+        """Remove paths that no longer exist on disk and refresh the UI."""
+        removed = 0
+        new_all_groups: List[GroupData] = []
+        for g in self._all_groups:
+            alive = [p for p in g.paths if os.path.exists(p)]
+            if len(alive) >= 2:
+                new_all_groups.append(GroupData(
+                    paths=alive, hint=g.hint,
+                    recoverable_bytes=_compute_group_size(alive),
+                    similarity=g.similarity, group_id=g.group_id,
+                ))
+                old_map = self._keep_states.get(g.group_id, {})
+                alive_set = set(alive)
+                new_map = {k: v for k, v in old_map.items() if k in alive_set}
+                if new_map and not any(v for v in new_map.values()):
+                    first_key = next(iter(new_map))
+                    new_map[first_key] = True
+                self._keep_states[g.group_id] = new_map
+            else:
+                removed += 1
+                self._keep_states.pop(g.group_id, None)
+
+        self._all_groups = new_all_groups
+        self._apply_filter()
+        self._current_group_idx = max(0, min(
+            self._current_group_idx, len(self._filtered_groups) - 1
+        )) if self._filtered_groups else -1
+        self._populate_group_list()
+        self._update_display()
+        self._update_stats()
+        self._bus.notify("Refresh complete", f"Removed {removed} dissolved groups", 2000)
+
+    def _trigger_rescan(self):
+        """Re-emit the last scan config so ScanPage picks it up."""
+        last_config = (self._result or {}).get("config")
+        if last_config and isinstance(last_config, dict):
+            self._bus.scan_requested.emit(last_config)
+            self._bus.notify("Rescan", "Re-running last scan configuration…", 1800)
+        else:
+            self._bus.notify("Rescan", "No previous scan config found. Start a new scan.", 2400)
+
     def _on_floating_delete_clicked(self, count: int = 0, size: int = 0):
         self._open_ceremony()
 
@@ -1591,8 +1647,8 @@ class ReviewPage(BaseStation):
 
         for idx, g in enumerate(self._filtered_groups):
             keep_map = self._keep_states.get(g.group_id, {})
-            kept_paths = [p for p in g.paths if keep_map.get(_norm_path(p), True)]
-            delete_paths = [p for p in g.paths if not keep_map.get(_norm_path(p), True)]
+            kept_paths = [p for p in g.paths if keep_map.get(p, True)]
+            delete_paths = [p for p in g.paths if not keep_map.get(p, True)]
 
             if not delete_paths:
                 continue
@@ -1702,9 +1758,9 @@ class ReviewPage(BaseStation):
                     group_id=g.group_id,
                 )
                 new_all_groups.append(new_group)
-                # Prune keep_states: remove entries for deleted paths
                 old_map = self._keep_states.get(g.group_id, {})
-                new_map = {k: v for k, v in old_map.items() if k not in deleted_norm}
+                new_map = {k: v for k, v in old_map.items()
+                           if _norm_path(k) not in deleted_norm}
                 # Guarantee at least one kept
                 if new_map and not any(v for v in new_map.values()):
                     first_key = next(iter(new_map))
@@ -1725,7 +1781,6 @@ class ReviewPage(BaseStation):
 
         self._populate_group_list()
         self._update_display()
-        self._update_stats()
         self._update_stats()
 
     def apply_theme(self):
