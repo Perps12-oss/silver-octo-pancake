@@ -1,7 +1,8 @@
 # cerebro/ui/pages/review_page.py
 """
-CEREBRO — Review Page (Gemini 2 Edition)
-Exact MacPaw Gemini 2 look & feel on Windows + all original powerful features preserved.
+CEREBRO — Review Page (Gemini 2 Edition — Final)
+Clean, spacious, minimalistic. Smart Select is now one-click powerful.
+All original features preserved and enhanced.
 """
 
 from __future__ import annotations
@@ -42,6 +43,17 @@ from cerebro.ui.state_bus import get_state_bus
 from cerebro.ui.theme_engine import get_theme_manager, current_colors
 from cerebro.services.logger import log_info, log_debug
 
+# Debug session log (NDJSON) for selection-state verification
+_DEBUG_LOG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "debug-e08e7f.log")
+
+def _debug_log(message: str, data: dict) -> None:
+    try:
+        import json
+        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"sessionId": "e08e7f", "message": message, "data": data, "timestamp": __import__("time").time()}) + "\n")
+    except Exception:
+        pass
+
 
 # ==============================================================================
 # CONSTANTS
@@ -72,6 +84,24 @@ ALL_MEDIA_TYPES = {
 def _norm_path(p: Optional[str]) -> str:
     """Normalize path for use as keep_map key so lookups work across filter changes."""
     return os.path.normpath(os.path.normcase(str(p or "")))
+
+
+def _keep_list_from_raw(raw, group) -> list:
+    """Return list of keep bools (one per path). Supports dict or list storage."""
+    paths = group.paths or []
+    n = len(paths)
+    if isinstance(raw, list) and len(raw) >= n:
+        return list(raw[:n])
+    if isinstance(raw, dict):
+        return [raw.get(_norm_path(str(p) if p else ""), True) for p in paths]
+    return [True] * n
+
+
+def _normalize_keep_map(keep_map: dict) -> dict:
+    """Return a copy of keep_map with all keys normalized for consistent lookups."""
+    if not keep_map:
+        return {}
+    return {_norm_path(str(k) if k else ""): v for k, v in keep_map.items()}
 
 
 def get_file_category(path: str) -> str:
@@ -532,13 +562,15 @@ def extract_group_data(group: Any, idx: int = 0) -> GroupData:
 # ==============================================================================
 
 class DualPaneComparison(QFrame):
-    file_selected = Signal(str)
+    file_selected = Signal(str)  # path (legacy)
+    pane_keep_index = Signal(int)  # 0=Original, 1=Duplicate; use for keep state by index
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("DualPaneComparison")
         self._build()
         self._current_paths: List[str] = []
+        self._keep_index = 0  # which pane is kept (0=left, 1=right)
 
     def _build(self):
         layout = QHBoxLayout(self)
@@ -629,22 +661,16 @@ class DualPaneComparison(QFrame):
         return pane
 
     def set_kept_path(self, kept_path: Optional[str]) -> None:
-        """Highlight only the Keep button for the given path; unhighlight the other."""
+        """Set which path is kept by path; updates _keep_index and button labels (no pane borders)."""
         try:
             kept_norm = os.path.normpath(os.path.normcase(str(kept_path or "")))
-            highlight = "background: #3b82f6; color: white; font-weight: bold; border-radius: 8px; padding: 8px;"
-            neutral = "background: transparent; color: #94a3b8; border: 1px solid #475569; border-radius: 8px; padding: 8px;"
-            if len(self._current_paths) >= 1 and os.path.normpath(os.path.normcase(self._current_paths[0])) == kept_norm:
-                self.left_keep_btn.setStyleSheet(highlight)
-                if len(self._current_paths) >= 2:
-                    self.right_keep_btn.setStyleSheet(neutral)
-            elif len(self._current_paths) >= 2 and os.path.normpath(os.path.normcase(self._current_paths[1])) == kept_norm:
-                self.right_keep_btn.setStyleSheet(highlight)
-                self.left_keep_btn.setStyleSheet(neutral)
-            else:
-                self.left_keep_btn.setStyleSheet(neutral)
-                if len(self._current_paths) >= 2:
-                    self.right_keep_btn.setStyleSheet(neutral)
+            left_norm = os.path.normpath(os.path.normcase(str(self._current_paths[0]))) if len(self._current_paths) >= 1 else ""
+            right_norm = os.path.normpath(os.path.normcase(str(self._current_paths[1]))) if len(self._current_paths) >= 2 else ""
+            if left_norm and left_norm == kept_norm:
+                self._keep_index = 0
+            elif right_norm and right_norm == kept_norm:
+                self._keep_index = 1
+            self._update_keep_delete_labels()
         except Exception:
             pass
 
@@ -654,12 +680,18 @@ class DualPaneComparison(QFrame):
 
     def _on_keep_clicked(self, pane: str):
         if pane == "Original" and self._current_paths:
+            self._keep_index = 0
             self.file_selected.emit(self._current_paths[0])
+            self.pane_keep_index.emit(0)
         elif pane == "Duplicate" and len(self._current_paths) > 1:
+            self._keep_index = 1
             self.file_selected.emit(self._current_paths[1])
+            self.pane_keep_index.emit(1)
+        self._update_keep_delete_labels()
 
-    def set_comparison(self, paths: List[str], similarity: float = 100.0):
+    def set_comparison(self, paths: List[str], similarity: float = 100.0, keep_index: int = 0):
         self._current_paths = paths
+        self._keep_index = keep_index
         self.similarity_label.setText(f"{similarity:.0f}%")
 
         if similarity >= 95:
@@ -674,6 +706,14 @@ class DualPaneComparison(QFrame):
             self._load_image(self.left_img, self.left_info, paths[0])
         if len(paths) >= 2:
             self._load_image(self.right_img, self.right_info, paths[1])
+        self._update_keep_delete_labels()
+
+    def _update_keep_delete_labels(self):
+        """Update only button labels (✓ Kept / ✗ Delete). No pane borders."""
+        if len(self._current_paths) >= 1:
+            self.left_keep_btn.setText("✓ Kept" if self._keep_index == 0 else "✗ Delete")
+        if len(self._current_paths) >= 2:
+            self.right_keep_btn.setText("✓ Kept" if self._keep_index == 1 else "✗ Delete")
 
     def _load_image(self, img_label: QLabel, info_label: QLabel, path: str):
         if is_image_file(path):
@@ -825,6 +865,7 @@ class SmartSelectWorker(QThread):
         self._criteria = criteria
 
     def run(self):
+        log_debug(f"[SmartSelect] algorithm start groups={len(self._groups_data)}")
         result = {}
         for group_id, paths in self._groups_data:
             if not paths:
@@ -833,16 +874,17 @@ class SmartSelectWorker(QThread):
                 if self._criteria == "first":
                     keeper = paths[0]
                 elif self._criteria == "oldest":
-                    keeper = min(paths, key=lambda p: os.path.getmtime(p))
+                    keeper = min(paths, key=lambda p: os.path.getmtime(str(p)))
                 elif self._criteria == "newest":
-                    keeper = max(paths, key=lambda p: os.path.getmtime(p))
+                    keeper = max(paths, key=lambda p: os.path.getmtime(str(p)))
                 elif self._criteria == "largest":
-                    keeper = max(paths, key=lambda p: os.path.getsize(p))
+                    keeper = max(paths, key=lambda p: os.path.getsize(str(p)))
                 elif self._criteria == "smallest":
-                    keeper = min(paths, key=lambda p: os.path.getsize(p))
+                    keeper = min(paths, key=lambda p: os.path.getsize(str(p)))
                 else:
                     continue
-                result[group_id] = {p: (p == keeper) for p in paths}
+                keeper_norm = _norm_path(str(keeper))
+                result[group_id] = {_norm_path(str(p)): (_norm_path(str(p)) == keeper_norm) for p in paths}
             except Exception:
                 continue
         self.finished_result.emit(result)
@@ -871,7 +913,8 @@ class ReviewPage(BaseStation):
         self._all_groups: List[GroupData] = []
         self._filtered_groups: List[GroupData] = []
         self._current_group_idx = -1
-        self._keep_states: Dict[int, Dict[str, bool]] = {}
+        # UNIFIED: always dict[group_id: int, list[bool]] — keep by index
+        self._keep_states: Dict[int, List[bool]] = {}
 
         self._current_filter = "All Files"
         self._progress_dialog = None
@@ -901,7 +944,7 @@ class ReviewPage(BaseStation):
         # Prominent large delete button (used in bottom bar)
         self._large_delete_btn = QPushButton("Delete (0)")
         self._large_delete_btn.setObjectName("LargeDeleteButton")
-        self._large_delete_btn.setMinimumHeight(44)
+        self._large_delete_btn.setMinimumSize(180, 48)
         self._large_delete_btn.setCursor(Qt.PointingHandCursor)
         self._large_delete_btn.setToolTip("Delete selected files. Routes through confirmation.")
         self._large_delete_btn.clicked.connect(self._open_ceremony)
@@ -944,6 +987,7 @@ class ReviewPage(BaseStation):
         # Smart Select = single FAB + popover menu (5 rules)
         self.smart_select_fab = QPushButton("Smart Select • 0 safe", self)
         self.smart_select_fab.setObjectName("SmartSelectFAB")
+        self.smart_select_fab.setMinimumSize(220, 48)
         self.smart_select_fab.setFixedSize(140, 52)
         self.smart_select_fab.setCursor(Qt.PointingHandCursor)
         self.smart_select_fab.setToolTip("One-click rules: keep newest, oldest, largest, smallest. Deletion Gate keeps at least one copy.")
@@ -985,15 +1029,16 @@ class ReviewPage(BaseStation):
             QMenu::item {{ padding: 10px 20px; color: {theme_token('text')}; border-radius: 8px; }}
             QMenu::item:selected {{ background: {theme_token('accent')}; color: white; }}
         """)
-        for text, callback in [
-            ("Keep Oldest in Each", self._smart_keep_oldest),
-            ("Keep Newest in Each", self._smart_keep_newest),
-            ("Keep Largest in Each", self._smart_keep_largest),
-            ("Keep Smallest in Each", self._smart_keep_smallest),
-            ("Keep First in Each", self._smart_keep_first),
+        # When user chooses a rule, it marks ALL other files as DELETE (one kept per group)
+        for text, criteria in [
+            ("Keep Oldest in Each", "oldest"),
+            ("Keep Newest in Each", "newest"),
+            ("Keep Largest in Each", "largest"),
+            ("Keep Smallest in Each", "smallest"),
+            ("Keep First in Each", "first"),
         ]:
             action = menu.addAction(text)
-            action.triggered.connect(callback)
+            action.triggered.connect(lambda checked=False, c=criteria: self._apply_smart_to_filtered(c))
         menu.exec(self.smart_select_fab.mapToGlobal(self.smart_select_fab.rect().bottomLeft()))
 
     def confirm_delete_selected(self) -> None:
@@ -1177,8 +1222,10 @@ class ReviewPage(BaseStation):
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(20)
 
-        # Slim nav: subtle arrows + group counter
-        nav = QHBoxLayout()
+        # Slim nav: subtle arrows + group counter (wrapped so we can hide when empty)
+        nav_widget = QWidget()
+        nav = QHBoxLayout(nav_widget)
+        nav.setContentsMargins(0, 0, 0, 0)
         self.prev_group_btn = QPushButton("◀")
         self.prev_group_btn.setObjectName("NavArrowBtn")
         self.prev_group_btn.setFixedSize(44, 36)
@@ -1198,11 +1245,11 @@ class ReviewPage(BaseStation):
         nav.addWidget(self.prev_group_btn)
         nav.addWidget(self.group_counter, 1)
         nav.addWidget(self.next_group_btn)
-        layout.addLayout(nav)
+        layout.addWidget(nav_widget)
 
         # Hero: DualPaneComparison (generous space)
         self.comparison = DualPaneComparison()
-        self.comparison.file_selected.connect(self._on_comparison_keep_selected)
+        self.comparison.pane_keep_index.connect(self._on_comparison_keep_by_index)
         layout.addWidget(self.comparison, 1)
 
         # One-line file detail (replaces right-panel preview)
@@ -1228,6 +1275,37 @@ class ReviewPage(BaseStation):
         layout.addWidget(self.file_table)
         self.file_table.setVisible(False)
 
+        # Empty state: big centered message (hidden by default)
+        empty_msg = (
+            "No files could be deleted. Selected paths may have been moved or deleted, "
+            "or may point to the same file as the kept copy."
+        )
+        self._empty_state_label = QLabel(empty_msg)
+        self._empty_state_label.setObjectName("EmptyStateLabel")
+        self._empty_state_label.setAlignment(Qt.AlignCenter)
+        self._empty_state_label.setWordWrap(True)
+        self._empty_state_label.setStyleSheet(
+            "font-size: 18px; font-weight: 600; color: #00C4B4; padding: 24px;"
+        )
+        self._empty_state_label.setMinimumWidth(400)
+        self._empty_state_container = QWidget()
+        empty_layout = QVBoxLayout(self._empty_state_container)
+        empty_layout.setContentsMargins(0, 0, 0, 0)
+        empty_layout.addStretch()
+        empty_layout.addWidget(self._empty_state_label)
+        empty_layout.addStretch()
+        layout.addWidget(self._empty_state_container)
+        self._empty_state_container.setVisible(False)
+
+        # Widgets to hide when showing empty state (so we can toggle)
+        self._center_content_widgets = [
+            nav_widget,
+            self.comparison,
+            self.center_detail_line,
+            self._files_expander_btn,
+            self.file_table,
+        ]
+
         return panel
 
     def _on_files_expander_toggled(self, checked: bool):
@@ -1236,19 +1314,54 @@ class ReviewPage(BaseStation):
         if hasattr(self, "_files_expander_btn"):
             self._files_expander_btn.setText("Hide files in group" if checked else "Show all files in group")
 
+    def _show_empty_state(self, message: Optional[str] = None) -> None:
+        """Show big centered empty-state message; hide left panel, comparison, file table, floating delete."""
+        default_msg = (
+            "No files could be deleted. Selected paths may have been moved or deleted, "
+            "or may point to the same file as the kept copy."
+        )
+        if hasattr(self, "_empty_state_label") and self._empty_state_label is not None:
+            self._empty_state_label.setText(message if message else default_msg)
+        if hasattr(self, "_empty_state_container") and self._empty_state_container is not None:
+            self._empty_state_container.setVisible(True)
+        if hasattr(self, "_center_content_widgets"):
+            for w in self._center_content_widgets:
+                if w is not None:
+                    w.setVisible(False)
+        if hasattr(self, "left_panel") and self.left_panel is not None:
+            self.left_panel.setVisible(False)
+        if hasattr(self, "floating_delete") and self.floating_delete is not None:
+            self.floating_delete.update_count(0, 0)
+            self.floating_delete.setEnabled(False)
+
+    def _hide_empty_state(self) -> None:
+        """Show comparison/content; hide empty-state message; show left panel."""
+        if hasattr(self, "_empty_state_container") and self._empty_state_container is not None:
+            self._empty_state_container.setVisible(False)
+        if hasattr(self, "_center_content_widgets"):
+            for w in self._center_content_widgets:
+                if w is not None:
+                    w.setVisible(True)
+        if hasattr(self, "file_table") and self.file_table is not None:
+            self.file_table.setVisible(getattr(self, "_files_expander_btn", None) and self._files_expander_btn.isChecked())
+        if hasattr(self, "left_panel") and self.left_panel is not None:
+            self.left_panel.setVisible(True)
+
     def _build_bottom_bar(self):
-        """Clean 3 elements: status text | Export List | Delete Selected (X)."""
+        """Clean bottom bar: status text (stretch) | spacing | Export | Delete | hint. Spacious, premium layout."""
         bar = QFrame()
         bar.setObjectName("StatusBar")
-        bar.setFixedHeight(52)
+        bar.setFixedHeight(64)
 
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(20, 8, 20, 8)
-        layout.setSpacing(20)
+        layout.setContentsMargins(24, 8, 24, 8)
+        layout.setSpacing(24)
 
         self.status_text = QLabel("Ready")
         self.status_text.setStyleSheet(f"font-size: 13px; color: {theme_token('muted')};")
         layout.addWidget(self.status_text, 1)
+
+        layout.addStretch(1)
 
         self.selection_stats = QLabel("")
         self.selection_stats.setStyleSheet("font-size: 12px; color: #94a3b8;")
@@ -1256,6 +1369,7 @@ class ReviewPage(BaseStation):
 
         self.export_list_btn = QPushButton("Export List")
         self.export_list_btn.setToolTip("Export current duplicate list to CSV or JSON.")
+        self.export_list_btn.setMinimumSize(180, 48)
         self.export_list_btn.setCursor(Qt.PointingHandCursor)
         self.export_list_btn.clicked.connect(self._on_export_list)
         layout.addWidget(self.export_list_btn)
@@ -1313,28 +1427,45 @@ class ReviewPage(BaseStation):
         QShortcut(QKeySequence("Delete"), self).activated.connect(self._open_ceremony)
 
         for i in range(1, 6):
+            idx = i - 1
             QShortcut(QKeySequence(str(i)), self).activated.connect(
-                lambda checked, idx=i-1: self._keep_file_by_index(idx)
+                lambda _idx=idx: self._keep_file_by_index(_idx)
             )
 
     def _wire(self):
         self.file_table.itemChanged.connect(self._on_file_table_changed)
-        if hasattr(self._bus, "deletion_completed"):
-            self._bus.deletion_completed.connect(self._on_deletion_completed)
+        self.file_table.cellClicked.connect(self._on_file_table_cell_clicked)
+        try:
+            if hasattr(self._bus, "deletion_completed"):
+                self._bus.deletion_completed.connect(self._on_deletion_completed)
+        except Exception:
+            pass
+        # Note: MainWindow always calls review.refresh_after_deletion() directly after delete,
+        # so the UI refreshes even if the signal connection above fails or is missing.
 
     @Slot(dict)
     def load_scan_result(self, result: dict):
         self._result = dict(result or {})
         if hasattr(self, "_post_delete_banner") and self._post_delete_banner is not None:
             self._post_delete_banner.setVisible(False)
-        groups_raw = self._result.get("groups") or []
+        groups_raw = self._result.get("groups")
+        if not isinstance(groups_raw, list):
+            groups_raw = []
 
-        self._all_groups = [extract_group_data(g, i) for i, g in enumerate(groups_raw)]
+        self._all_groups = []
+        for i, g in enumerate(groups_raw):
+            try:
+                self._all_groups.append(extract_group_data(g, i))
+            except Exception:
+                continue
         self._apply_filter()
 
         self._keep_states.clear()
         for g in self._all_groups:
-            self._keep_states[g.group_id] = {_norm_path(p): True for p in g.paths}
+            try:
+                self._keep_states[int(g.group_id)] = [True] * len(g.paths or [])
+            except Exception:
+                continue
 
         self._current_group_idx = 0 if self._filtered_groups else -1
 
@@ -1374,8 +1505,15 @@ class ReviewPage(BaseStation):
         self._populate_group_list()
 
     def _on_filter_changed(self, filter_text: str):
-        self._current_filter = filter_text
+        # #region agent log
+        _debug_log("category changed", {"old": getattr(self, "_current_filter", ""), "new": filter_text or ""})
+        # #endregion
+        self._current_filter = filter_text or "All Files"
         self._apply_filter()
+        if hasattr(self, "filter_combo") and self.filter_combo is not None and self.filter_combo.currentText() != self._current_filter:
+            self.filter_combo.blockSignals(True)
+            self.filter_combo.setCurrentText(self._current_filter)
+            self.filter_combo.blockSignals(False)
         self._populate_group_list()
         self._current_group_idx = 0 if self._filtered_groups else -1
         self._update_display()
@@ -1395,6 +1533,15 @@ class ReviewPage(BaseStation):
             return self._filtered_groups[self._current_group_idx]
         return None
 
+    def _apply_keep_map_for_group(self, group_id: int, keep_map: dict) -> None:
+        """Write _keep_states for group_id from a path->bool map. Normalizes all keys so selection model stays consistent."""
+        g = next((x for x in self._all_groups if int(x.group_id) == int(group_id)), None)
+        if not g or not (g.paths or []):
+            return
+        norm_map = _normalize_keep_map(keep_map or {})
+        keep_list = [norm_map.get(_norm_path(str(p) if p else ""), True) for p in (g.paths or [])]
+        self._keep_states[int(group_id)] = keep_list
+
     def _populate_group_list(self):
         while self.group_list_layout.count():
             item = self.group_list_layout.takeAt(0)
@@ -1407,10 +1554,8 @@ class ReviewPage(BaseStation):
             item = GroupListItem(group.group_id, group)
             item.clicked.connect(self._on_group_clicked)
             item.checkbox_changed.connect(self._on_group_checkbox_changed)
-            keep_map = self._keep_states.get(group.group_id, {})
-            delete_count = sum(
-                1 for p in group.paths if not keep_map.get(_norm_path(str(p) if p else ""), True)
-            )
+            keep_list = _keep_list_from_raw(self._keep_states.get(int(group.group_id)), group)
+            delete_count = sum(1 for i, p in enumerate(group.paths or []) if not (keep_list[i] if i < len(keep_list) else True))
             all_kept = delete_count == 0
             all_delete = delete_count == len(group.paths) - 1 and len(group.paths) >= 2
             item.checkbox.blockSignals(True)
@@ -1442,10 +1587,8 @@ class ReviewPage(BaseStation):
             group = next((g for g in self._all_groups if g.group_id == group_id), None)
             if not group:
                 return
-            keep_map = self._keep_states.get(group_id, {})
-            delete_count = sum(
-                1 for p in group.paths if not keep_map.get(_norm_path(str(p) if p else ""), True)
-            )
+            keep_list = _keep_list_from_raw(self._keep_states.get(int(group_id)), group)
+            delete_count = sum(1 for i, p in enumerate(group.paths or []) if not (keep_list[i] if i < len(keep_list) else True))
             all_kept = delete_count == 0
             all_delete = delete_count == len(group.paths) - 1 and len(group.paths) >= 2
             w.checkbox.blockSignals(True)
@@ -1471,10 +1614,8 @@ class ReviewPage(BaseStation):
             group = next((g for g in self._all_groups if g.group_id == group_id), None)
             if not group:
                 continue
-            keep_map = self._keep_states.get(group_id, {})
-            delete_count = sum(
-                1 for p in group.paths if not keep_map.get(_norm_path(str(p) if p else ""), True)
-            )
+            keep_list = _keep_list_from_raw(self._keep_states.get(int(group_id)), group)
+            delete_count = sum(1 for i, p in enumerate(group.paths or []) if not (keep_list[i] if i < len(keep_list) else True))
             all_kept = delete_count == 0
             all_delete = delete_count == len(group.paths) - 1 and len(group.paths) >= 2
             w.checkbox.blockSignals(True)
@@ -1487,17 +1628,23 @@ class ReviewPage(BaseStation):
             w.checkbox.blockSignals(False)
 
     def _refresh_all_ui(self) -> None:
-        """Sync group checkboxes, current group display, and stats (call once after batch updates)."""
+        """Sync group checkboxes, current group display, stats, and delete button (call once after batch updates)."""
         self._sync_group_checkboxes()
         self._update_display()
         self._update_stats()
+        self._refresh_delete_button()
 
     def _update_display(self):
+        if len(self._filtered_groups) == 0:
+            self._show_empty_state()
+            return
+        self._hide_empty_state()
         group = self._get_current_group()
         if not group:
             return
 
-        keep_map = self._keep_states.get(group.group_id, {})
+        keep_list = _keep_list_from_raw(self._keep_states.get(int(group.group_id)), group)
+        keep_map = {_norm_path(str(p) if p else ""): (keep_list[i] if i < len(keep_list) else True) for i, p in enumerate(group.paths or [])}
 
         self.group_counter.setText(
             f"Group {self._current_group_idx + 1} of {len(self._filtered_groups)} "
@@ -1507,7 +1654,12 @@ class ReviewPage(BaseStation):
         self.next_group_btn.setEnabled(self._current_group_idx < len(self._filtered_groups) - 1)
 
         display_paths = group.paths[:2] if len(group.paths) >= 2 else group.paths
-        self.comparison.set_comparison(display_paths, group.similarity)
+        keep_index_display = 0
+        for i in range(min(2, len(keep_list))):
+            if keep_list[i]:
+                keep_index_display = i
+                break
+        self.comparison.set_comparison(display_paths, group.similarity, keep_index=keep_index_display)
         kept_files = [p for p in group.paths if keep_map.get(_norm_path(p), True)]
         kept_path = kept_files[0] if kept_files else (group.paths[0] if group.paths else None)
         if hasattr(self.comparison, "set_kept_path") and kept_path:
@@ -1526,6 +1678,7 @@ class ReviewPage(BaseStation):
                 item.widget().set_selected(item.widget().group_id == group.group_id)
 
     def _populate_file_table(self, group, keep_map):
+        """keep_map: path (normalized) -> bool (True = keep). Can be built from keep_list as {_norm_path(p): keep_list[i]}."""
         self.file_table.blockSignals(True)
         try:
             self.file_table.setRowCount(0)
@@ -1569,34 +1722,54 @@ class ReviewPage(BaseStation):
         self.center_detail_line.setText(f"{Path(file_path).name}  •  {size_str}  •  {mod_str}")
 
     def _compute_delete_count(self):
-        """Single source of truth: count paths marked for delete from _keep_states + _filtered_groups."""
+        """Single source of truth: count paths marked for delete from _keep_states + _filtered_groups. Supports list (by index) or dict (by path) storage."""
         delete_count = 0
         delete_paths = []
         for g in self._filtered_groups:
-            keep_map = self._keep_states.get(g.group_id, {})
-            for p in g.paths:
-                key = _norm_path(str(p) if p else "")
-                if not keep_map.get(key, True):
+            keep_list = _keep_list_from_raw(self._keep_states.get(int(g.group_id)), g)
+            for i, p in enumerate(g.paths or []):
+                if not (keep_list[i] if i < len(keep_list) else True):
                     delete_count += 1
                     delete_paths.append(p)
         return delete_count, delete_paths
 
+    def _update_selection_state_ui(self, override_count: Optional[int] = None, override_size: Optional[int] = None) -> None:
+        """Single recompute: derive delete count/size from _keep_states + _filtered_groups and update bottom label + both delete buttons. Call after any selection-affecting action."""
+        if override_count is not None and override_size is not None:
+            delete_count, delete_size = override_count, override_size
+        else:
+            delete_count, delete_paths = self._compute_delete_count()
+            delete_size = 0
+            if len(delete_paths) <= STATS_SIZE_CHUNK:
+                for p in delete_paths:
+                    try:
+                        delete_size += os.path.getsize(p)
+                    except Exception:
+                        pass
+        # #region agent log
+        _debug_log("recompute ran", {"active_filter": getattr(self, "_current_filter", ""), "delete_count": delete_count})
+        # #endregion
+        log_debug(f"[SmartSelect] recompute delete_count={delete_count}")
+        if hasattr(self, "selection_stats") and self.selection_stats is not None:
+            self.selection_stats.setText(f"{delete_count} files selected for deletion ({format_bytes(delete_size)})")
+        if hasattr(self, "status_text") and self.status_text is not None:
+            self.status_text.setText(f"{delete_count} files marked for deletion")
+        if hasattr(self, "floating_delete") and self.floating_delete is not None:
+            self.floating_delete.update_count(delete_count, delete_size)
+            self.floating_delete.setEnabled(delete_count > 0)
+            self.floating_delete.update()
+            self.floating_delete.repaint()
+        if hasattr(self, "_large_delete_btn") and self._large_delete_btn is not None:
+            self._large_delete_btn.setText(f"Delete ({delete_count})")
+            self._large_delete_btn.setEnabled(delete_count > 0)
+            log_debug(f"[SmartSelect] Delete button enabled={delete_count > 0} count={delete_count}")
+            # #region agent log
+            _debug_log("Delete button state", {"enabled": delete_count > 0, "count": delete_count})
+            # #endregion
+
     def _refresh_delete_button(self) -> None:
-        """Force-update floating delete button from current _keep_states (call after any selection change)."""
-        delete_count, delete_paths = self._compute_delete_count()
-        if not hasattr(self, "floating_delete") or self.floating_delete is None:
-            return
-        size = 0
-        if len(delete_paths) <= STATS_SIZE_CHUNK:
-            for p in delete_paths:
-                try:
-                    size += os.path.getsize(p)
-                except Exception:
-                    pass
-        self.floating_delete.update_count(delete_count, size)
-        self.floating_delete.setEnabled(delete_count > 0)
-        self.floating_delete.update()
-        self.floating_delete.repaint()
+        """Thin wrapper: all selection UI (bottom label + both buttons) updated from one recompute."""
+        self._update_selection_state_ui()
 
     def _update_stats(self):
         total_groups = len(self._filtered_groups)
@@ -1607,10 +1780,8 @@ class ReviewPage(BaseStation):
         n_none = 0
         n_full = 0
         for g in self._filtered_groups:
-            keep_map = self._keep_states.get(g.group_id, {})
-            delete_in_group = sum(
-                1 for p in g.paths if not keep_map.get(_norm_path(str(p) if p else ""), True)
-            )
+            keep_list = _keep_list_from_raw(self._keep_states.get(int(g.group_id)), g)
+            delete_in_group = sum(1 for i, p in enumerate(g.paths or []) if not (keep_list[i] if i < len(keep_list) else True))
             if delete_in_group == 0:
                 n_none += 1
             elif delete_in_group == len(g.paths) - 1 and len(g.paths) >= 2:
@@ -1651,18 +1822,9 @@ class ReviewPage(BaseStation):
 
     def _apply_stats_ui(self, delete_count: int, delete_size: int, total_groups: int,
                         total_files: int, total_size: int):
+        """Update group/file summary and Smart Select label only. Delete count/buttons come from _update_selection_state_ui()."""
         self.quick_stats.setText(f"{total_groups} groups • {total_files} files • {format_bytes(total_size)}")
         self.left_summary.setText(f"Showing {total_groups} of {len(self._all_groups)} groups")
-        self.status_text.setText(f"{delete_count} files marked for deletion")
-        self.selection_stats.setText(f"{delete_count} files selected for deletion ({format_bytes(delete_size)})")
-        if hasattr(self, "floating_delete") and self.floating_delete is not None:
-            self.floating_delete.update_count(delete_count, delete_size)
-            self.floating_delete.setEnabled(delete_count > 0)
-            self.floating_delete.update()
-            self.floating_delete.repaint()
-        if hasattr(self, "_large_delete_btn") and self._large_delete_btn is not None:
-            self._large_delete_btn.setText(f"Delete ({delete_count})")
-            self._large_delete_btn.setEnabled(delete_count > 0)
         safe_count = total_files - delete_count
         if hasattr(self, "smart_select_fab"):
             self.smart_select_fab.setText(f"Smart Select • {safe_count} safe")
@@ -1679,15 +1841,7 @@ class ReviewPage(BaseStation):
                 pass
         if not self._pending_size_paths:
             cnt = getattr(self, "_pending_size_count", 0)
-            self.selection_stats.setText(f"{cnt} files selected for deletion ({format_bytes(self._pending_size_total)})")
-            if hasattr(self, "floating_delete") and self.floating_delete is not None:
-                self.floating_delete.update_count(cnt, self._pending_size_total)
-                self.floating_delete.setEnabled(cnt > 0)
-                self.floating_delete.update()
-                self.floating_delete.repaint()
-            if hasattr(self, "_large_delete_btn") and self._large_delete_btn is not None:
-                self._large_delete_btn.setText(f"Delete ({cnt})")
-                self._large_delete_btn.setEnabled(cnt > 0)
+            self._update_selection_state_ui(override_count=cnt, override_size=self._pending_size_total)
             return
         QTimer.singleShot(0, self._chunked_size_next)
 
@@ -1716,13 +1870,12 @@ class ReviewPage(BaseStation):
         if not group or idx >= len(group.paths):
             return
 
-        keep_map = self._keep_states.get(group.group_id, {})
-        for i, p in enumerate(group.paths):
-            keep_map[_norm_path(p)] = (i == idx)
-        self._keep_states[group.group_id] = keep_map
+        gid = int(group.group_id)
+        keep_list = [ (i == idx) for i in range(len(group.paths or [])) ]
+        self._keep_states[gid] = keep_list
         self._update_display()
         self._update_stats()
-        self._update_group_list_item(group.group_id)
+        self._update_group_list_item(gid)
         self._refresh_delete_button()
 
     def _on_group_clicked(self, group_id: int):
@@ -1744,16 +1897,13 @@ class ReviewPage(BaseStation):
         if not group:
             return
 
-        keep_map = self._keep_states.get(group_id, {})
-
+        gid = int(group_id)
+        n = len(group.paths or [])
         if checked:
-            for i, p in enumerate(group.paths):
-                keep_map[_norm_path(p)] = (i == 0)
+            keep_list = [ (i == 0) for i in range(n) ]  # keep first, delete rest
         else:
-            for p in group.paths:
-                keep_map[_norm_path(p)] = True
-
-        self._keep_states[group_id] = keep_map
+            keep_list = [ True ] * n
+        self._keep_states[gid] = keep_list
         self._update_display()
         self._update_stats()
         self._update_group_list_item(group_id)
@@ -1764,13 +1914,21 @@ class ReviewPage(BaseStation):
         self._batch_updating = True
         try:
             for g in self._filtered_groups:
-                keep_map = {}
-                for i, p in enumerate(g.paths):
-                    keep_map[_norm_path(p)] = (i == 0) if check else True
-                self._keep_states[g.group_id] = keep_map
+                n = len(g.paths or [])
+                keep_list = [ (i == 0) if check else True for i in range(n) ]
+                self._keep_states[int(g.group_id)] = keep_list
         finally:
             self._batch_updating = False
         self._refresh_all_ui()
+
+    def _on_file_table_cell_clicked(self, row: int, column: int) -> None:
+        """When user clicks a row, set that file as the one to keep (swap selection)."""
+        if self._batch_updating:
+            return
+        group = self._get_current_group()
+        if not group or row < 0 or row >= len(group.paths):
+            return
+        self._keep_file_by_index(row)
 
     def _on_file_table_changed(self, item):
         if self._batch_updating:
@@ -1785,39 +1943,38 @@ class ReviewPage(BaseStation):
         group = self._get_current_group()
         if not group or not path:
             return
-
-        keep_map = self._keep_states.get(group.group_id, {})
-        if not keep_map:
-            keep_map = {_norm_path(str(p) or ""): True for p in group.paths}
-        keep_map[_norm_path(path)] = not delete
-
-        kept_count = sum(1 for v in keep_map.values() if v)
-        if kept_count == 0:
+        path_norm = _norm_path(path)
+        row_index = next((i for i, p in enumerate(group.paths or []) if _norm_path(str(p) or "") == path_norm), None)
+        if row_index is None:
+            return
+        gid = int(group.group_id)
+        keep_list = _keep_list_from_raw(self._keep_states.get(gid), group)
+        keep_list[row_index] = not delete  # True = keep, False = delete
+        if sum(keep_list) == 0:
             item.setCheckState(Qt.Unchecked)
-            keep_map[_norm_path(path)] = True
+            keep_list[row_index] = True
             QMessageBox.warning(self, "Invalid Selection", "You must keep at least one file per group.")
-
-        self._keep_states[group.group_id] = keep_map
+        self._keep_states[gid] = keep_list
         self._update_display()
         self._update_stats()
         self._update_group_list_item(group.group_id)
         self._refresh_delete_button()
 
-    def _on_comparison_keep_selected(self, file_path: str):
+    def _on_comparison_keep_by_index(self, pane_index: int):
+        """Keep the file at pane_index (0=Original, 1=Duplicate); mark all others in group for delete. Uses list-by-index so duplicate paths work."""
         if self._batch_updating:
             return
         group = self._get_current_group()
-        if not group:
+        if not group or not group.paths:
             return
-
-        file_path_norm = _norm_path(file_path)
-        keep_map = self._keep_states.get(group.group_id, {})
-        if not keep_map:
-            keep_map = {_norm_path(p): True for p in group.paths}
-        for p in group.paths:
-            keep_map[_norm_path(p)] = (_norm_path(p) == file_path_norm)
-        self._keep_states[group.group_id] = keep_map
-
+        # Clamp to valid index (comparison shows at most first 2 paths)
+        idx = max(0, min(pane_index, len(group.paths) - 1))
+        gid = int(group.group_id)
+        keep_list = [ (i == idx) for i in range(len(group.paths)) ]
+        self._keep_states[gid] = keep_list
+        # #region agent log
+        _debug_log("keep_selected", {"group_id": gid, "pane_index": idx, "delete_count_in_group": sum(1 for v in keep_list if not v)})
+        # #endregion
         self._update_display()
         self._update_stats()
         self._update_group_list_item(group.group_id)
@@ -1854,6 +2011,8 @@ class ReviewPage(BaseStation):
         if self._smart_select_worker is not None and self._smart_select_worker.isRunning():
             self._bus.notify("Busy", "Smart Select already running…", 1500)
             return
+        log_info(f"[SmartSelect] trigger criteria={criteria}")
+        self._last_smart_select_criteria = criteria
 
         groups_data = [(g.group_id, list(g.paths)) for g in self._filtered_groups]
         self._smart_select_worker = SmartSelectWorker(groups_data, criteria, self)
@@ -1866,14 +2025,41 @@ class ReviewPage(BaseStation):
 
     @Slot(object)
     def _on_smart_select_finished(self, result: dict):
+        """Apply Smart Select result: one file kept per group, all others marked for deletion. Uses explicit keep_list by index so file table checkboxes and delete count update correctly."""
         result = result or {}
         self._batch_updating = True
+        applied_ids = []
         try:
             for group_id, keep_map in result.items():
-                self._keep_states[group_id] = {_norm_path(p): v for p, v in (keep_map or {}).items()}
+                group_id = int(group_id)
+                g = next((x for x in self._all_groups if int(x.group_id) == group_id), None)
+                if not g or not (g.paths or []):
+                    continue
+                paths = g.paths or []
+                keep_map = keep_map or {}
+                norm_map = _normalize_keep_map(keep_map)
+                # Build keep_list by index: only the chosen file is True, all others False.
+                keeper_index = 0
+                for i, p in enumerate(paths):
+                    if norm_map.get(_norm_path(str(p) if p else ""), False):
+                        keeper_index = i
+                        break
+                keep_list = [False] * len(paths)
+                keep_list[keeper_index] = True
+                self._keep_states[group_id] = keep_list
+                applied_ids.append(group_id)
         finally:
             self._batch_updating = False
+        criteria_str = getattr(self, "_last_smart_select_criteria", "?")
+        log_info(f"[SmartSelect] groups_applied criteria={criteria_str} groups={applied_ids[:10]}{'...' if len(applied_ids) > 10 else ''} n={len(applied_ids)}")
+        delete_count, delete_paths = self._compute_delete_count()
+        log_info(f"[SmartSelect] finished groups_modified={len(result)} delete_count={delete_count}")
         self._refresh_all_ui()
+        self._update_display()
+        self._update_stats()
+        self._refresh_delete_button()
+        dc_after, _ = self._compute_delete_count()
+        log_debug(f"[SmartSelect] after recompute delete_count={dc_after}")
         if hasattr(self, "status_text"):
             self.status_text.setText(f"{len(result)} groups updated")
         self._bus.notify(
@@ -1919,23 +2105,61 @@ class ReviewPage(BaseStation):
     def _open_ceremony(self):
         """Unified deletion orchestration entrypoint. All delete triggers route here."""
         log_debug("[Delete] _open_ceremony triggered")
+        # Use same source of truth as bottom bar: never show "No Delete Candidates" when bar says N files selected
+        delete_count_from_ui, _ = self._compute_delete_count()
+        if delete_count_from_ui == 0:
+            QMessageBox.information(
+                self,
+                "No Delete Candidates",
+                "No files are marked for deletion.\n\n"
+                "Check the 'Delete' checkbox on files you want to remove.",
+            )
+            return
+
         delete_groups = []
         total_delete_size = 0
 
         for idx, g in enumerate(self._filtered_groups):
-            keep_map = self._keep_states.get(g.group_id, {})
-            kept_paths = [p for p in g.paths if keep_map.get(_norm_path(p), True)]
-            delete_paths = [p for p in g.paths if not keep_map.get(_norm_path(p), True)]
+            keep_list = _keep_list_from_raw(self._keep_states.get(int(g.group_id)), g)
+            paths = g.paths or []
+            kept_paths = [p for i, p in enumerate(paths) if (keep_list[i] if i < len(keep_list) else True)]
+            delete_paths = [p for i, p in enumerate(paths) if not (keep_list[i] if i < len(keep_list) else True)]
 
             if not delete_paths:
                 continue
-            # Pipeline requires exactly one "keep" per group; use first kept path (must be str for pipeline)
-            keep_path = kept_paths[0] if kept_paths else g.paths[0]
-            keep_path = str(keep_path) if keep_path else ""
-            delete_paths_str = [str(p) for p in delete_paths if p]
-            if not keep_path or not os.path.exists(keep_path):
+            # Determine the single keeper path first (for excluding from delete list)
+            candidates = kept_paths if kept_paths else (g.paths or [])
+            keep_path = ""
+            for p in candidates:
+                s = str(p) if p else ""
+                if s and os.path.exists(s):
+                    keep_path = s
+                    break
+            if not keep_path:
+                for p in (g.paths or []):
+                    s = str(p) if p else ""
+                    if s and os.path.exists(s):
+                        keep_path = s
+                        break
+            if not keep_path:
+                keep_path = str(kept_paths[0]) if kept_paths and kept_paths[0] is not None else (str(g.paths[0]) if g.paths else "")
+            keep_norm = _norm_path(keep_path) if keep_path else ""
+            # Explicitly remove keeper from delete list (normalized comparison) so pipeline never sees keeper in delete
+            delete_paths = [p for p in delete_paths if _norm_path(str(p)) != keep_norm]
+            if not delete_paths:
                 continue
-            group_size = sum(os.path.getsize(p) for p in delete_paths if os.path.exists(p))
+            delete_paths_str = [str(p) for p in delete_paths if p]
+            if not delete_paths_str:
+                continue
+            # Size of files we're actually deleting (same list as delete_paths_str; use try/except so path format doesn't yield 0)
+            group_size = 0
+            for sp in delete_paths_str:
+                if not sp:
+                    continue
+                try:
+                    group_size += os.path.getsize(sp)
+                except (OSError, TypeError):
+                    pass
             total_delete_size += group_size
             delete_groups.append({
                 "group_index": idx,
@@ -1947,13 +2171,13 @@ class ReviewPage(BaseStation):
             })
 
         if not delete_groups:
-            log_debug("[Delete] No delete candidates")
-            QMessageBox.information(
-                self,
-                "No Delete Candidates",
-                "No files are marked for deletion.\n\n"
-                "Check the 'Delete' checkbox on files you want to remove.",
+            log_debug("[Delete] No delete groups built (keeper excluded or paths missing/same-file)")
+            self._show_empty_state(
+                "No files could be deleted. Selected paths may have been moved or deleted, "
+                "or may point to the same file as the kept copy."
             )
+            if hasattr(self, "status_text") and self.status_text is not None:
+                self.status_text.setText("No duplicates remaining")
             return
 
         total_files = sum(len(g["delete"]) for g in delete_groups)
@@ -1988,10 +2212,11 @@ class ReviewPage(BaseStation):
         }
 
         scan_id = str(self._result.get("scan_id", "") or "unknown")
+        # Emit a plain dict copy so Signal(object) and receivers get stable data
         cleanup_data = {
             "scan_id": scan_id,
-            "groups": delete_groups,
-            "stats": stats,
+            "groups": [dict(g) for g in delete_groups],
+            "stats": dict(stats),
             "policy": {"mode": mode},
             "source": "review_page",
         }
@@ -2064,7 +2289,7 @@ class ReviewPage(BaseStation):
         self._all_groups = new_all_groups
         self._keep_states.clear()
         for g in self._all_groups:
-            self._keep_states[g.group_id] = {_norm_path(p): True for p in g.paths}
+            self._keep_states[int(g.group_id)] = [True] * len(g.paths or [])
         self._apply_filter()
         self._current_group_idx = 0 if self._filtered_groups else -1
         self._populate_group_list()
@@ -2075,17 +2300,17 @@ class ReviewPage(BaseStation):
             self._post_delete_banner.setVisible(False)
 
     def refresh_after_deletion(self, deleted_paths: list) -> None:
-        """Remove deleted paths from UI models and refresh. Single _norm_path for consistency."""
+        """Remove all pipeline-reported deleted paths from UI models (do not use os.path.exists; Recycle Bin files still exist). Then refresh; if no groups left, show empty-state message."""
         if not deleted_paths:
             return
         deleted_set = {_norm_path(str(p)) for p in deleted_paths}
 
         new_all_groups: List[GroupData] = []
         for g in self._all_groups:
-            remaining = [p for p in g.paths if _norm_path(p) not in deleted_set]
+            remaining = [p for p in (g.paths or []) if _norm_path(str(p) if p else "") not in deleted_set]
             if len(remaining) >= 2:
                 try:
-                    rec = sum(os.path.getsize(p) for p in remaining if os.path.exists(p))
+                    rec = sum(os.path.getsize(p) for p in remaining if os.path.exists(str(p)))
                 except Exception:
                     rec = 0
                 new_all_groups.append(GroupData(
@@ -2098,12 +2323,26 @@ class ReviewPage(BaseStation):
         self._all_groups = new_all_groups
         self._keep_states.clear()
         for g in self._all_groups:
-            self._keep_states[g.group_id] = {_norm_path(p): True for p in g.paths}
+            self._keep_states[int(g.group_id)] = [True] * len(g.paths or [])
 
         self._apply_filter()
         self._current_group_idx = 0 if self._filtered_groups else -1
+
+        if len(self._filtered_groups) == 0:
+            self._show_empty_state("No duplicates remaining.")
+            if hasattr(self, "status_text") and self.status_text is not None:
+                self.status_text.setText("No duplicates remaining")
+            if hasattr(self, "comparison") and self.comparison is not None:
+                self.comparison.set_comparison([], 100.0, keep_index=0)
+            if hasattr(self, "file_table") and self.file_table:
+                self.file_table.setRowCount(0)
+                self.file_table.clearSelection()
+            self._update_stats()
+            self._refresh_delete_button()
+            return
+
+        self._hide_empty_state()
         self._populate_group_list()
-        # Clear selection for deleted items (table and list)
         if hasattr(self, "file_table") and self.file_table:
             self.file_table.clearSelection()
             self.file_table.setCurrentCell(-1, -1)
@@ -2271,6 +2510,8 @@ class ReviewPage(BaseStation):
     def showEvent(self, event):
         super().showEvent(event)
         self._position_floating_button()
+        if getattr(self, "_filtered_groups", None):
+            self._refresh_delete_button()
 
 
 __all__ = [

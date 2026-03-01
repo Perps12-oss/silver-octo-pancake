@@ -239,6 +239,13 @@ class LiveScanPanel(QFrame):
         
         layout.addLayout(progress_layout)
         
+        # Advanced details section (Files/Speed/Size/Throughput, Current file, Warnings) — hidden in Simple mode
+        self._advanced_details_section = QWidget()
+        self._advanced_details_section.setObjectName("AdvancedDetailsSection")
+        adv_layout = QVBoxLayout(self._advanced_details_section)
+        adv_layout.setContentsMargins(0, 0, 0, 0)
+        adv_layout.setSpacing(12)
+        
         # Statistics grid
         stats_grid = QGridLayout()
         stats_grid.setSpacing(8)
@@ -257,10 +264,12 @@ class LiveScanPanel(QFrame):
         stats_grid.addWidget(QLabel("Throughput:"), 1, 2)
         stats_grid.addWidget(self._throughput_label, 1, 3)
         
-        layout.addLayout(stats_grid)
+        stats_widget = QWidget()
+        stats_widget.setLayout(stats_grid)
+        adv_layout.addWidget(stats_widget)
         
         # Current file section
-        layout.addWidget(QLabel("Current file:"))
+        adv_layout.addWidget(QLabel("Current file:"))
         
         self._current_file_frame = QFrame()
         self._current_file_frame.setObjectName("CurrentFileFrame")
@@ -274,22 +283,10 @@ class LiveScanPanel(QFrame):
         self._current_file_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         
         file_layout.addWidget(self._current_file_label)
-        layout.addWidget(self._current_file_frame)
-        
-        # Results section
-        results_layout = QHBoxLayout()
-        results_layout.setSpacing(16)
-        
-        self._groups_frame = self._create_result_frame("Groups found", "0")
-        self._dupes_frame = self._create_result_frame("Duplicates", "0")
-        
-        results_layout.addWidget(self._groups_frame)
-        results_layout.addWidget(self._dupes_frame)
-        
-        layout.addLayout(results_layout)
+        adv_layout.addWidget(self._current_file_frame)
         
         # Warnings section
-        layout.addWidget(QLabel("Warnings:"))
+        adv_layout.addWidget(QLabel("Warnings:"))
         
         warning_scroll = QScrollArea()
         warning_scroll.setWidgetResizable(True)
@@ -308,7 +305,21 @@ class LiveScanPanel(QFrame):
         self._warning_layout.addWidget(self._warning_placeholder)
 
         warning_scroll.setWidget(warning_container)
-        layout.addWidget(warning_scroll)
+        adv_layout.addWidget(warning_scroll)
+        
+        layout.addWidget(self._advanced_details_section)
+        
+        # Results section (Groups found, Duplicates) — always visible on main view
+        results_layout = QHBoxLayout()
+        results_layout.setSpacing(16)
+        
+        self._groups_frame = self._create_result_frame("Groups found", "0")
+        self._dupes_frame = self._create_result_frame("Duplicates", "0")
+        
+        results_layout.addWidget(self._groups_frame)
+        results_layout.addWidget(self._dupes_frame)
+        
+        layout.addLayout(results_layout)
 
     def _on_live_blink(self) -> None:
         """Toggle live indicator dot for animation."""
@@ -348,6 +359,11 @@ class LiveScanPanel(QFrame):
             self._dupes_label = value_label
             
         return frame
+
+    def set_show_advanced_details(self, show: bool) -> None:
+        """Show or hide Files/Speed/Size/Throughput, Current file, and Warnings (Advanced mode only)."""
+        if hasattr(self, "_advanced_details_section") and self._advanced_details_section is not None:
+            self._advanced_details_section.setVisible(show)
 
     def _apply_theme(self) -> None:
         """Apply theme colors via stylesheet."""

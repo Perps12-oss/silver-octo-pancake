@@ -374,15 +374,18 @@ class PerformanceMonitor(QGroupBox):
             # Update cache stats
             try:
                 from cerebro.services.hash_cache import HashCache
-                cache = HashCache()
-                cache_stats = cache.get_stats()
-                
-                cache_size_mb = cache_stats.get("cache_size_mb", 0)
-                cache_entries = cache_stats.get("total_entries", 0)
-                
-                self._cache_size_label.setText(f"{cache_size_mb:.1f} MB")
-                self._cache_entries_label.setText(f"{cache_entries:,}")
-            except:
+                from cerebro.services.config import get_hash_cache_db_path
+                cache = HashCache(get_hash_cache_db_path())
+                cache.open()
+                try:
+                    cache_stats = cache.get_stats()
+                    cache_size_mb = cache_stats.get("cache_size_mb", 0)
+                    cache_entries = cache_stats.get("total_entries", 0)
+                    self._cache_size_label.setText(f"{cache_size_mb:.1f} MB")
+                    self._cache_entries_label.setText(f"{cache_entries:,}")
+                finally:
+                    cache.close()
+            except Exception:
                 self._cache_size_label.setText("—")
                 self._cache_entries_label.setText("—")
             
@@ -959,15 +962,19 @@ class HubPage(BaseStation):
         """Optimize cache databases"""
         try:
             from cerebro.services.hash_cache import HashCache
-            
-            cache = HashCache()
-            cache.vacuum()
-            
-            self._bus.notify(
-                "Optimization complete",
-                "Cache database optimized successfully",
-                2000
-            )
+            from cerebro.services.config import get_hash_cache_db_path
+
+            cache = HashCache(get_hash_cache_db_path())
+            cache.open()
+            try:
+                cache.vacuum()
+                self._bus.notify(
+                    "Optimization complete",
+                    "Cache database optimized successfully",
+                    2000
+                )
+            finally:
+                cache.close()
         except Exception as e:
             self._bus.notify("Error", f"Optimization failed: {e}", 3000)
     

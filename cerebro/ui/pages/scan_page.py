@@ -318,6 +318,8 @@ class ScanPage(BaseStation):
             self._advanced_container.setVisible(is_advanced)
         if hasattr(self, "_advanced_hint"):
             self._advanced_hint.setVisible(False)
+        if hasattr(self, "_live") and self._live is not None:
+            self._live.set_show_advanced_details(is_advanced)
         try:
             from cerebro.services.config import load_config, save_config
             config = load_config()
@@ -367,6 +369,7 @@ class ScanPage(BaseStation):
         live_card = ContentCard()
         live_card.set_content(self._live)
         content_layout.addWidget(live_card, 0)
+        self._live.set_show_advanced_details(self._scan_ui_mode == "advanced")
 
         self._idle_content = content
 
@@ -380,94 +383,118 @@ class ScanPage(BaseStation):
         self._scaffold.set_content(self._content_stack)
 
     def _build_complete_view(self) -> QWidget:
-        """Gemini 2 Scan Complete state: hero, 4 stat cards, Review CTA, New Scan link."""
+        """Gemini 2 Scan Complete: slim banner, 4 compact cards in one row, huge CTA, tiny links."""
         accent = theme_token("accent")
         muted = theme_token("muted")
         panel = theme_token("panel")
         text = theme_token("text")
+        line = theme_token("line")
 
         wrap = QWidget()
         layout = QVBoxLayout(wrap)
-        layout.setContentsMargins(LayoutMetrics.PAGE_MARGIN * 2, 40, LayoutMetrics.PAGE_MARGIN * 2, 40)
-        layout.setSpacing(28)
+        layout.setContentsMargins(24, 16, 24, 16)
+        layout.setSpacing(16)
 
-        # Hero: Scan Complete ✓
-        hero_frame = QFrame()
-        hero_frame.setObjectName("ScanCompleteHero")
-        hero_layout = QVBoxLayout(hero_frame)
-        hero_layout.setSpacing(16)
-        hero_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self._complete_title = QLabel("Scan Complete ✓")
-        self._complete_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._complete_title.setStyleSheet(f"font-size: 32px; font-weight: bold; color: {text};")
-        hero_layout.addWidget(self._complete_title)
-
+        # Slim horizontal success banner: "Scan Complete ✓   •   Xm Ys"
+        banner = QFrame()
+        banner.setObjectName("ScanCompleteBanner")
+        banner.setFixedHeight(44)
+        banner_layout = QVBoxLayout(banner)
+        banner_layout.setContentsMargins(16, 6, 16, 6)
+        banner_layout.setSpacing(4)
+        row1 = QHBoxLayout()
+        self._complete_title = QLabel("Scan Complete ✓   •   —")
+        self._complete_title.setStyleSheet(f"font-size: 15px; font-weight: 600; color: {text};")
+        row1.addWidget(self._complete_title)
+        row1.addStretch()
+        banner_layout.addLayout(row1)
         self._complete_progress = QProgressBar()
         self._complete_progress.setMaximum(100)
         self._complete_progress.setValue(100)
         self._complete_progress.setTextVisible(False)
-        self._complete_progress.setFixedHeight(6)
+        self._complete_progress.setFixedHeight(4)
         self._complete_progress.setStyleSheet(f"""
-            QProgressBar {{ background: {panel}; border-radius: 3px; }}
-            QProgressBar::chunk {{ background: #22c55e; border-radius: 3px; }}
+            QProgressBar {{ background: {panel}; border-radius: 2px; }}
+            QProgressBar::chunk {{ background: #22c55e; border-radius: 2px; }}
         """)
-        hero_layout.addWidget(self._complete_progress)
+        banner_layout.addWidget(self._complete_progress)
+        banner.setStyleSheet(f"""
+            QFrame#ScanCompleteBanner {{
+                background: rgba(34, 197, 94, 0.12);
+                border: 1px solid rgba(34, 197, 94, 0.35);
+                border-radius: 12px;
+            }}
+        """)
+        layout.addWidget(banner)
 
-        self._complete_subtitle = QLabel("Found 0 duplicate groups (0 files)")
-        self._complete_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._complete_subtitle.setStyleSheet(f"font-size: 15px; color: {muted};")
-        hero_layout.addWidget(self._complete_subtitle)
-
-        layout.addWidget(hero_frame)
-
-        # 4 stat cards
-        cards_layout = QGridLayout()
-        cards_layout.setSpacing(20)
-        self._complete_card_groups = StatCard("Groups found", "0", icon=None)
+        # 4 stat cards in one row — enough height so numbers (e.g. "2.6 GB", "0s") are never clipped
+        cards_row = QHBoxLayout()
+        cards_row.setSpacing(12)
+        _card_style = " QLabel#statCardValue { font-size: 20px; font-weight: bold; padding: 4px 0; min-height: 28px; } "
+        self._complete_card_groups = StatCard("Groups", "0", icon=None)
+        self._complete_card_groups.setMinimumHeight(96)
+        self._complete_card_groups.setStyleSheet(self._complete_card_groups.styleSheet() + _card_style)
+        cards_row.addWidget(self._complete_card_groups)
         self._complete_card_duplicates = StatCard("Duplicates", "0", icon=None)
-        self._complete_card_space = StatCard("Space you can free", "0 B", icon=None)
+        self._complete_card_duplicates.setMinimumHeight(96)
+        self._complete_card_duplicates.setStyleSheet(self._complete_card_duplicates.styleSheet() + _card_style)
+        cards_row.addWidget(self._complete_card_duplicates)
+        self._complete_card_space = StatCard("Space saved", "0 B", icon=None)
+        self._complete_card_space.setMinimumHeight(96)
+        self._complete_card_space.setStyleSheet(self._complete_card_space.styleSheet() + _card_style)
+        cards_row.addWidget(self._complete_card_space)
         self._complete_card_time = StatCard("Time taken", "—", icon=None)
-        cards_layout.addWidget(self._complete_card_groups, 0, 0)
-        cards_layout.addWidget(self._complete_card_duplicates, 0, 1)
-        cards_layout.addWidget(self._complete_card_space, 0, 2)
-        cards_layout.addWidget(self._complete_card_time, 0, 3)
-        layout.addLayout(cards_layout)
+        self._complete_card_time.setMinimumHeight(96)
+        self._complete_card_time.setStyleSheet(self._complete_card_time.styleSheet() + _card_style)
+        cards_row.addWidget(self._complete_card_time)
+        layout.addLayout(cards_row)
 
-        # Big teal CTA
-        layout.addSpacing(12)
+        # One huge centered teal CTA
         self._review_duplicates_btn = QPushButton("Review Duplicates")
         self._review_duplicates_btn.setObjectName("ReviewDuplicatesCTA")
-        self._review_duplicates_btn.setMinimumHeight(56)
+        self._review_duplicates_btn.setMinimumHeight(52)
         self._review_duplicates_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._review_duplicates_btn.setStyleSheet(f"""
             QPushButton#ReviewDuplicatesCTA {{
                 background: {accent};
                 color: white;
                 border: none;
-                border-radius: 14px;
-                font-size: 18px;
+                border-radius: 12px;
+                font-size: 17px;
                 font-weight: bold;
-                padding: 14px 32px;
+                padding: 12px 28px;
             }}
             QPushButton#ReviewDuplicatesCTA:hover {{ opacity: 0.95; }}
         """)
         self._review_duplicates_btn.clicked.connect(self._on_review_duplicates_clicked)
         layout.addWidget(self._review_duplicates_btn, 0, Qt.AlignmentFlag.AlignCenter)
 
-        # Tiny New Scan link + optional Advanced
-        row = QHBoxLayout()
-        row.setSpacing(24)
+        # Bottom action buttons: slightly bigger, clear affordance (not flat text)
+        _btn_style = (
+            f"font-size: 13px; color: {muted}; min-height: 40px; min-width: 120px; "
+            f"background: transparent; border: 1px solid {line}; border-radius: 8px; padding: 8px 16px;"
+        )
+        _btn_hover = f" QPushButton:hover {{ background: rgba(255,255,255,0.06); border-color: {accent}; }} "
+        links_row = QHBoxLayout()
+        links_row.setSpacing(16)
+        links_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._new_scan_link = QPushButton("New Scan")
-        self._new_scan_link.setFlat(True)
         self._new_scan_link.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._new_scan_link.setStyleSheet(f"font-size: 12px; color: {muted}; background: transparent; border: none;")
+        self._new_scan_link.setStyleSheet("QPushButton { " + _btn_style + " }" + _btn_hover)
         self._new_scan_link.clicked.connect(self._on_new_scan_clicked)
-        row.addWidget(self._new_scan_link, 0, Qt.AlignmentFlag.AlignCenter)
-        row.addStretch()
-        layout.addLayout(row)
+        self._advanced_details_link = QPushButton("Advanced Details")
+        self._advanced_details_link.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._advanced_details_link.setStyleSheet("QPushButton { " + _btn_style + " }" + _btn_hover)
+        self._advanced_details_link.clicked.connect(self._on_advanced_details_clicked)
+        self._export_log_link = QPushButton("Export Log")
+        self._export_log_link.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._export_log_link.setStyleSheet("QPushButton { " + _btn_style + " }" + _btn_hover)
+        self._export_log_link.clicked.connect(self._on_export_log_clicked)
+        links_row.addWidget(self._new_scan_link)
+        links_row.addWidget(self._advanced_details_link)
+        links_row.addWidget(self._export_log_link)
+        layout.addLayout(links_row)
 
-        layout.addStretch()
         return wrap
 
     def _on_review_duplicates_clicked(self) -> None:
@@ -482,7 +509,7 @@ class ScanPage(BaseStation):
             self._sticky.setVisible(True)
 
     def _show_complete_state(self) -> None:
-        """Populate and show Scan Complete view; fade progress bar after 1s."""
+        """Populate and show compact Scan Complete view; fade progress bar after 1s."""
         r = self._last_scan_result or {}
         groups_raw = r.get("groups") or []
         group_count = len(groups_raw)
@@ -490,7 +517,7 @@ class ScanPage(BaseStation):
         space_bytes = space_freeable_from_result(r)
         time_str = format_duration_short(self._last_scan_duration_sec) if self._last_scan_duration_sec else "—"
 
-        self._complete_subtitle.setText(f"Found {group_count} duplicate groups ({file_count} files)")
+        self._complete_title.setText(f"Scan Complete ✓   •   {time_str}")
         self._complete_card_groups.set_value(str(group_count))
         self._complete_card_duplicates.set_value(str(file_count))
         self._complete_card_space.set_value(format_bytes_short(space_bytes))
@@ -503,6 +530,15 @@ class ScanPage(BaseStation):
         if hasattr(self, "_sticky") and self._sticky:
             self._sticky.setVisible(False)
         self._content_stack.setCurrentIndex(1)
+
+    def _on_advanced_details_clicked(self) -> None:
+        """Show advanced details (e.g. full stats). Placeholder: switch to Advanced mode or no-op."""
+        self._set_scan_ui_mode("advanced")
+        self._on_new_scan_clicked()
+
+    def _on_export_log_clicked(self) -> None:
+        """Export scan log. Placeholder for future implementation."""
+        self._bus.notify("Export Log", "Scan log export can be added in Settings or Report.", 2000)
 
     def _fade_complete_progress(self) -> None:
         """Hide the 100% progress bar after 1s (Gemini minimal)."""
@@ -1032,6 +1068,37 @@ class ScanPage(BaseStation):
     def on_exit(self) -> None:
         """Called when page is hidden – no action needed."""
         return
+
+    def refresh_theme(self) -> None:
+        """Apply theme and refresh Scan Complete view styles (banner, CTA, bottom buttons)."""
+        super().refresh_theme()
+        accent = theme_token("accent")
+        muted = theme_token("muted")
+        line = theme_token("line")
+        if hasattr(self, "_review_duplicates_btn") and self._review_duplicates_btn:
+            self._review_duplicates_btn.setStyleSheet(f"""
+                QPushButton#ReviewDuplicatesCTA {{
+                    background: {accent};
+                    color: white;
+                    border: none;
+                    border-radius: 12px;
+                    font-size: 17px;
+                    font-weight: bold;
+                    padding: 12px 28px;
+                }}
+                QPushButton#ReviewDuplicatesCTA:hover {{ opacity: 0.95; }}
+            """)
+        _btn_style = (
+            f"font-size: 13px; color: {muted}; min-height: 40px; min-width: 120px; "
+            f"background: transparent; border: 1px solid {line}; border-radius: 8px; padding: 8px 16px;"
+        )
+        _btn_hover = f" QPushButton:hover {{ background: rgba(255,255,255,0.06); border-color: {accent}; }} "
+        for link in (getattr(self, "_new_scan_link", None), getattr(self, "_advanced_details_link", None), getattr(self, "_export_log_link", None)):
+            if link:
+                link.setStyleSheet("QPushButton { " + _btn_style + " }" + _btn_hover)
+        if hasattr(self, "_complete_title") and self._complete_title:
+            text = theme_token("text")
+            self._complete_title.setStyleSheet(f"font-size: 15px; font-weight: 600; color: {text};")
 
     def on_enter(self) -> None:
         """Sync scanner tier from global toolbar/bus when page is shown."""

@@ -75,6 +75,24 @@ class ThemedStack(QStackedWidget):
                     """)
 
 
+class PlanBuilderThread(QThread):
+    """Builds ExecutableDeletePlan off the main thread so path.exists()/stat() don't freeze the UI."""
+    plan_ready = Signal(object)   # ExecutableDeletePlan
+    plan_failed = Signal(str)
+
+    def __init__(self, pipeline: CerebroPipeline, deletion_plan: Dict[str, Any], parent=None):
+        super().__init__(parent)
+        self._pipeline = pipeline
+        self._deletion_plan = deletion_plan
+
+    def run(self) -> None:
+        try:
+            plan = self._pipeline.build_delete_plan(self._deletion_plan)
+            self.plan_ready.emit(plan)
+        except Exception as e:
+            self.plan_failed.emit(str(e))
+
+
 class PipelineCleanupWorker(QThread):
     """
     Background worker that executes a validated ExecutableDeletePlan through the pipeline.
@@ -183,6 +201,7 @@ class MainWindow(QMainWindow):
 
         # New: pipeline-driven cleanup worker
         self._cleanup_worker: Optional[PipelineCleanupWorker] = None
+        self._plan_builder: Optional[PlanBuilderThread] = None
         self._geometry_restored = False
 
         self._build_layout()
@@ -728,10 +747,13 @@ class MainWindow(QMainWindow):
         Pipeline owns validation, execution, and audit write-through.
         """
         try:
-            # Coerce payload (Signal(object) may pass non-dict in some Qt versions)
+            # Coerce payload (Signal(object) may pass non-dict or wrapped dict in some Qt versions)
             if payload is None or not isinstance(payload, dict):
                 payload = getattr(payload, "__dict__", None) or {}
-            if not payload or not (payload.get("groups")):
+            if not isinstance(payload, dict):
+                payload = {}
+            groups_in = payload.get("groups")
+            if not groups_in or not isinstance(groups_in, list):
                 log_debug("[Delete] MainWindow: payload empty or no groups")
                 self._toast.show_toast("Nothing to delete", "No files marked for deletion.", duration_ms=2200)
                 return
@@ -757,20 +779,6 @@ class MainWindow(QMainWindow):
                 self._toast.show_toast("Nothing to delete", "No delete candidates were selected.", duration_ms=2200)
                 return
 
-            # Build executable plan (authoritative validation in pipeline)
-            executable_plan = self._pipeline.build_delete_plan(deletion_plan)
-
-            # Temporary debug: log executable plan summary
-            try:
-                log_debug(
-                    f"[DEBUG] MainWindow._on_cleanup_confirmed executable "
-                    f"ops_len={len(getattr(executable_plan, 'operations', []))} "
-                    f"total_files={executable_plan.total_files} "
-                    f"stats_files={getattr(executable_plan, 'stats', {}).get('files')}"
-                )
-            except Exception:
-                pass
-
             # Prevent parallel cleanups
             if self._cleanup_worker is not None:
                 try:
@@ -781,10 +789,25 @@ class MainWindow(QMainWindow):
 
             self._toast.show_toast(
                 "Cleanup started 🧹",
-                f"Deleting {executable_plan.total_files} file(s) ({mode})…",
+                f"Preparing to delete {total_files} file(s)…",
                 duration_ms=1800,
             )
 
+            # Build plan off the main thread so path.exists()/stat() don't freeze the UI
+            self._plan_builder = PlanBuilderThread(self._pipeline, deletion_plan, self)
+            self._plan_builder.plan_ready.connect(self._on_delete_plan_ready)
+            self._plan_builder.plan_failed.connect(self._on_delete_plan_failed)
+            self._plan_builder.start()
+
+        except Exception as e:
+            log_error(f"[UI] Cleanup start failed: {e}")
+            self._toast.show_toast("Cleanup blocked ❌", str(e), duration_ms=4200)
+
+    @Slot(object)
+    def _on_delete_plan_ready(self, executable_plan: ExecutableDeletePlan) -> None:
+        """Plan built successfully off-thread; start the cleanup worker."""
+        self._plan_builder = None
+        try:
             w = PipelineCleanupWorker(self._pipeline, executable_plan, self)
             self._cleanup_worker = w
             w.progress.connect(self._on_cleanup_progress)
@@ -792,10 +815,32 @@ class MainWindow(QMainWindow):
             w.error.connect(self._on_cleanup_error)
             w.cancelled.connect(self._on_cleanup_cancelled)
             w.start()
-
         except Exception as e:
-            log_error(f"[UI] Cleanup start failed: {e}")
-            self._toast.show_toast("Cleanup blocked ❌", str(e), duration_ms=4200)
+            log_error(f"[UI] Cleanup worker start failed: {e}")
+            self._toast.show_toast("Cleanup failed ❌", str(e), duration_ms=4200)
+            self._close_cleanup_progress_dialog()
+
+    @Slot(str)
+    def _on_delete_plan_failed(self, error_message: str) -> None:
+        """Plan building failed (e.g. validation); show error and close progress dialog."""
+        self._plan_builder = None
+        log_error(f"[UI] Delete plan build failed: {error_message}")
+        self._toast.show_toast("Cleanup blocked ❌", error_message, duration_ms=4200)
+        self._close_cleanup_progress_dialog()
+
+    def _close_cleanup_progress_dialog(self) -> None:
+        """Close the Review page's progress dialog if open."""
+        try:
+            review = self._pages.get("review")
+            dialog = getattr(review, "_progress_dialog", None)
+            if dialog is not None:
+                try:
+                    dialog.reject()
+                except Exception:
+                    pass
+                setattr(review, "_progress_dialog", None)
+        except Exception:
+            pass
 
     @Slot(int, int, str)
     def _on_cleanup_progress(self, current: int, total: int, current_file: str) -> None:
@@ -851,13 +896,22 @@ class MainWindow(QMainWindow):
                     f"Deleted: {deleted_count} · Failed: {len(result.failed)}",
                     duration_ms=3200,
                 )
-                # Single event: ReviewPage subscribes and refreshes + shows post-delete banner
+                payload = {
+                    "deleted_paths": [str(p) for p in result.deleted],
+                    "scan_id": getattr(result, "scan_id", "") or "",
+                    "deleted_count": deleted_count,
+                }
+                # Direct refresh first: ensure review UI always updates even if deletion_completed signal
+                # is not connected or fails (e.g. hasattr check in ReviewPage._wire() or connection error).
+                review = self._pages.get("review")
+                if review and hasattr(review, "refresh_after_deletion") and hasattr(review, "_show_post_delete_banner"):
+                    try:
+                        review.refresh_after_deletion(payload.get("deleted_paths") or [])
+                        review._show_post_delete_banner(deleted_count)
+                    except Exception as e:
+                        log_error(f"[UI] Review direct refresh after deletion failed: {e}")
                 try:
-                    self._bus.deletion_completed.emit({
-                        "deleted_paths": [str(p) for p in result.deleted],
-                        "scan_id": getattr(result, "scan_id", "") or "",
-                        "deleted_count": deleted_count,
-                    })
+                    self._bus.deletion_completed.emit(payload)
                 except Exception as e:
                     log_error(f"[UI] deletion_completed emit failed: {e}")
 
