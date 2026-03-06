@@ -1,0 +1,27 @@
+CEREBRO Crash Report
+Time: 2026-03-05 23:36:02.155605
+
+Traceback (most recent call last):
+  File "C:\Users\S8633\OneDrive\Desktop\silver-octo-pancake\main.py", line 88, in main
+    print_step("Importing PySide6...")
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\S8633\OneDrive\Desktop\silver-octo-pancake\main.py", line 39, in print_step
+    print(f"{status} {step}")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\S8633\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2713' in position 0: character maps to <undefined>
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\S8633\OneDrive\Desktop\silver-octo-pancake\main.py", line 171, in <module>
+    exit_code = main()
+  File "C:\Users\S8633\OneDrive\Desktop\silver-octo-pancake\main.py", line 161, in main
+    print(f"\n❌ UNEXPECTED ERROR: {e}")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\S8633\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u274c' in position 2: character maps to <undefined>
