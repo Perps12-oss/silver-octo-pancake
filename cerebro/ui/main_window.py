@@ -138,7 +138,12 @@ class PipelineCleanupWorker(QThread):
 
 
 class MainWindow(QMainWindow):
-    """Main application window with safe navigation and authoritative cleanup integration."""
+    """
+    Main application window: composition shell only.
+    Responsibilities: page registration, navigation, signal routing, status bar, top-level dialogs.
+    Pipeline and deletion execution live in CerebroPipeline / PipelineCleanupWorker;
+    scan result mutation and deletion UX live in ReviewPage and engine contracts.
+    """
 
     def __init__(self):
         super().__init__()
@@ -444,6 +449,18 @@ class MainWindow(QMainWindow):
         except Exception as e:
             log_error(f"[UI] History ingest failed: {e}")
 
+        # Store recent scan summary for Start page Mission Control
+        try:
+            import time as _time
+            self._bus.set_last_scan_summary({
+                "scan_id": str(result.get("scan_id") or ""),
+                "groups": len(result.get("groups") or []),
+                "root": str(result.get("root") or result.get("scan_root") or ""),
+                "timestamp": _time.time(),
+            })
+        except Exception:
+            pass
+
     def _on_scan_failed(self, err: str) -> None:
         """Handle scan failure."""
         self._toast.show_toast("Scan failed ❌", str(err or "Unknown error"), duration_ms=3200)
@@ -579,6 +596,7 @@ class MainWindow(QMainWindow):
                 duration_ms=1800,
             )
 
+            # Non-blocking: worker runs in QThread; progress dialog updates via signals
             w = PipelineCleanupWorker(self._pipeline, executable_plan, self)
             self._cleanup_worker = w
             w.progress.connect(self._on_cleanup_progress)
@@ -648,12 +666,13 @@ class MainWindow(QMainWindow):
                     duration_ms=3200,
                 )
 
-            # Refresh review page: reconcile in-memory groups and refresh UI (Gate A)
+            # Refresh review page: reconcile in-memory groups and show engine result (deleted + failed)
             review = self._pages.get("review")
             deleted_list = list(result.deleted) if isinstance(result, DeletionResult) and getattr(result, "deleted", None) is not None else []
+            failed_list = [(str(p), e or "Unknown error") for p, e in (getattr(result, "failed", []) or [])] if isinstance(result, DeletionResult) else []
             if review and hasattr(review, "refresh_after_deletion") and isinstance(result, DeletionResult):
                 try:
-                    review.refresh_after_deletion(deleted_list)
+                    review.refresh_after_deletion(deleted_list, failed_list=failed_list)
                 except Exception as e:
                     log_error(f"[UI] Review refresh_after_deletion failed: {e}")
             elif review and hasattr(review, "load_scan_result") and hasattr(review, "_result"):

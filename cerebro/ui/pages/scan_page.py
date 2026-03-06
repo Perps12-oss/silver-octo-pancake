@@ -53,6 +53,7 @@ from cerebro.ui.models.live_scan_snapshot import LiveScanSnapshot
 from cerebro.ui.pages.base_station import BaseStation
 from cerebro.ui.state_bus import get_state_bus
 from cerebro.ui.widgets.live_scan_panel import LiveScanPanel
+from cerebro.scanners import CORE_TIERS
 
 
 # ============================================================================
@@ -317,24 +318,57 @@ class ScanPage(BaseStation):
         toggle_row.addStretch()
         parent_layout.addLayout(toggle_row)
 
-        # --- Scanner tier (always visible) ---
+        # --- Scan Strategy: core tiers (registry) + optional experimental ---
+        strategy_label = QLabel("Scan Strategy")
+        strategy_label.setStyleSheet(f"color: {text}; font-weight: bold; margin-top: 8px;")
+        parent_layout.addWidget(strategy_label)
+
         scanner_row = QHBoxLayout()
         scanner_row.setSpacing(LayoutMetrics.PAGE_SPACING)
-        scanner_row.addWidget(QLabel("Scanner:"))
+        # Core modes: simple (ScanEngine), advanced, turbo — from scanner registry
         self._scanner_tier_combo = QComboBox()
         self._scanner_tier_combo.addItems([
-            "Turbo (12x faster - Production)",
-            "Ultra (60x faster - Extreme)",
-            "Quantum (180x+ faster - GPU/Experimental)"
+            "Simple (ScanEngine)",
+            "Advanced",
+            "Turbo",
         ])
-        self._scanner_tier_combo.setCurrentIndex(0)
+        self._scanner_tier_combo.setCurrentIndex(2)  # default Turbo
         self._scanner_tier_combo.setToolTip(
-            "Turbo: Production-ready, 12x faster (no extra deps)\n"
-            "Ultra: Extreme performance, 60x faster (requires: pip install xxhash mmh3 numpy)\n"
-            "Quantum: Bleeding edge, 180x+ faster (requires GPU + pip install cupy-cuda12x torch)"
+            "Simple: ScanEngine entrypoint, balanced.\n"
+            "Advanced: More thorough scan strategy.\n"
+            "Turbo: Optimized production scanner."
         )
+        self._scanner_tier_combo.setMinimumWidth(LayoutMetrics.COMBO_MIN_WIDTH)
+        scanner_row.addWidget(QLabel("Core:"))
         scanner_row.addWidget(self._scanner_tier_combo, 1)
         parent_layout.addLayout(scanner_row)
+
+        # Experimental modes (expandable); visible when enabled in Settings
+        from PySide6.QtWidgets import QGroupBox
+        self._experimental_group = QGroupBox("Experimental")
+        self._experimental_group.setCheckable(True)
+        self._experimental_group.setChecked(False)
+        self._experimental_group.setToolTip("Enable in Settings → Advanced to use experimental scanners.")
+        exp_layout = QVBoxLayout(self._experimental_group)
+        exp_layout.setContentsMargins(12, 16, 12, 12)
+        exp_row = QHBoxLayout()
+        exp_row.addWidget(QLabel("Scanner:"))
+        self._experimental_tier_combo = QComboBox()
+        self._experimental_tier_combo.addItems(["Ultra", "Quantum"])
+        self._experimental_tier_combo.setToolTip(
+            "Ultra: Extreme performance (extra deps).\nQuantum: GPU/bleeding edge."
+        )
+        exp_row.addWidget(self._experimental_tier_combo, 1)
+        exp_layout.addLayout(exp_row)
+        self._experimental_group.setVisible(True)  # show panel; use checked state to decide if selected
+        self._experimental_group.toggled.connect(lambda _: self._persist_scanner_tier())
+        # Gate: enable only when Settings → Advanced has "experimental scanners" checked
+        try:
+            opts = self._bus.get_scan_options() or {}
+            self._experimental_group.setEnabled(bool(opts.get("experimental_scanners", False)))
+        except Exception:
+            self._experimental_group.setEnabled(False)
+        parent_layout.addWidget(self._experimental_group)
 
         # --- Advanced options container (hidden in Simple mode) ---
         self._advanced_options = QWidget()
@@ -475,14 +509,20 @@ class ScanPage(BaseStation):
         if hasattr(self._bus, "resume_scan_requested"):
             self._bus.resume_scan_requested.connect(self._on_resume_requested)
         
-        # Scanner tier selection change
+        # Scanner tier selection change (core + experimental)
         if hasattr(self, "_scanner_tier_combo"):
             self._scanner_tier_combo.currentIndexChanged.connect(self._on_scanner_tier_changed)
+        if hasattr(self, "_experimental_tier_combo"):
+            self._experimental_tier_combo.currentIndexChanged.connect(self._on_experimental_tier_changed)
         # Advanced options toggle (in case toggled before signal was connected)
         if hasattr(self, "_advanced_options"):
             opts = self._bus.get_scan_options() or {}
             is_adv = (opts.get("scan_ui_mode", "simple") == "advanced")
             self._advanced_options.setVisible(is_adv)
+        # Experimental scanners gate from Settings
+        if hasattr(self, "_experimental_group"):
+            opts = self._bus.get_scan_options() or {}
+            self._experimental_group.setEnabled(bool(opts.get("experimental_scanners", False)))
 
     # -------------------------------------------------------------------------
     # Snapshot handling (single source of truth)
@@ -546,13 +586,17 @@ class ScanPage(BaseStation):
         self._start_scan_btn.setEnabled(state.start_enabled)
         self._start_scan_btn.setVisible(True)
 
-        # Scan filters (media type, engine, scanner tier)
+        # Scan filters (media type, engine, scanner tier, experimental)
         if getattr(self, "_media_type_combo", None) is not None:
             self._media_type_combo.setEnabled(state.options_enabled)
         if getattr(self, "_engine_combo", None) is not None:
             self._engine_combo.setEnabled(state.options_enabled)
         if getattr(self, "_scanner_tier_combo", None) is not None:
             self._scanner_tier_combo.setEnabled(state.options_enabled)
+        if getattr(self, "_experimental_group", None) is not None:
+            self._experimental_group.setEnabled(state.options_enabled)
+        if getattr(self, "_experimental_tier_combo", None) is not None:
+            self._experimental_tier_combo.setEnabled(state.options_enabled)
         # Disable mode toggle while scanning
         if getattr(self, "_simple_btn", None) is not None:
             self._simple_btn.setEnabled(state.options_enabled)
@@ -629,10 +673,14 @@ class ScanPage(BaseStation):
         media_type = ("all", "photos", "videos", "audio")[self._media_type_combo.currentIndex()]
         engine = ("simple", "advanced")[self._engine_combo.currentIndex()]
         
-        # Get scanner tier selection
-        scanner_tier_idx = self._scanner_tier_combo.currentIndex()
-        scanner_tier = ("turbo", "ultra", "quantum")[scanner_tier_idx]
-        
+        # Scanner tier: core (simple/advanced/turbo) or experimental (ultra/quantum)
+        if getattr(self, "_experimental_group", None) and self._experimental_group.isChecked():
+            exp_idx = self._experimental_tier_combo.currentIndex()
+            scanner_tier = ("ultra", "quantum")[exp_idx]
+        else:
+            core_idx = self._scanner_tier_combo.currentIndex()
+            scanner_tier = list(CORE_TIERS)[core_idx]  # simple, advanced, turbo
+
         config = create_scan_config(
             root_path, 
             options, 
@@ -724,37 +772,40 @@ class ScanPage(BaseStation):
         """Legacy – can be used for future debug logging."""
         return
     
+    def _persist_scanner_tier(self) -> None:
+        """Write current scanner tier (core or experimental) to state bus."""
+        try:
+            opts = dict(self._bus.get_scan_options() or {})
+            if getattr(self, "_experimental_group", None) and self._experimental_group.isChecked():
+                idx = self._experimental_tier_combo.currentIndex()
+                opts["scanner_tier"] = ("ultra", "quantum")[idx]
+            else:
+                idx = self._scanner_tier_combo.currentIndex()
+                opts["scanner_tier"] = list(CORE_TIERS)[idx]
+            self._bus.set_scan_options(opts)
+        except Exception:
+            pass
+
     @Slot(int)
     def _on_scanner_tier_changed(self, index: int) -> None:
-        """Handle scanner tier selection change."""
-        tier_info = {
-            0: {
-                "name": "TurboScanner",
-                "speedup": "12x faster",
-                "desc": "Production-ready with SQLite caching and parallel processing. No extra dependencies needed.",
-                "icon": "✅"
-            },
-            1: {
-                "name": "UltraScanner",
-                "speedup": "60x faster",
-                "desc": "Extreme performance with Bloom filters and SIMD hashing. Install: pip install xxhash mmh3 numpy",
-                "icon": "🚀"
-            },
-            2: {
-                "name": "QuantumScanner",
-                "speedup": "180x+ faster",
-                "desc": "Bleeding edge with GPU acceleration. Install: pip install cupy-cuda12x torch pyzmq",
-                "icon": "⚡"
-            }
-        }
-        
-        info = tier_info.get(index, tier_info[0])
-        
-        # Show notification with scanner info
+        """Handle core scanner tier selection change."""
+        tiers = list(CORE_TIERS)
+        name = tiers[index].capitalize() if 0 <= index < len(tiers) else "Simple"
+        self._persist_scanner_tier()
         self._bus.notify(
-            f"{info['icon']} {info['name']} selected",
-            f"{info['speedup']} - {info['desc']}",
-            3000  # 3 seconds
+            f"Scan strategy: {name}",
+            "Core scanner tier updated.",
+            1800,
+        )
+
+    def _on_experimental_tier_changed(self, index: int) -> None:
+        """Handle experimental scanner tier selection."""
+        name = ("Ultra", "Quantum")[index] if index in (0, 1) else "Ultra"
+        self._persist_scanner_tier()
+        self._bus.notify(
+            f"Experimental: {name}",
+            "Use Settings → Advanced to enable experimental scanners.",
+            2000,
         )
 
     # -------------------------------------------------------------------------
@@ -825,13 +876,35 @@ class ScanPage(BaseStation):
         """Sync scanner tier and UI mode from global toolbar/bus when page is shown."""
         try:
             opts = self._bus.get_scan_options() or {}
-            # Restore scanner tier
-            tier = (opts.get("scanner_tier") or "turbo").lower()
-            idx = {"turbo": 0, "ultra": 1, "quantum": 2}.get(tier, 0)
-            if getattr(self, "_scanner_tier_combo", None) is not None:
-                self._scanner_tier_combo.blockSignals(True)
-                self._scanner_tier_combo.setCurrentIndex(idx)
-                self._scanner_tier_combo.blockSignals(False)
+            tier = (opts.get("scanner_tier") or "turbo").strip().lower()
+            experimental_enabled = bool(opts.get("experimental_scanners", False))
+            if not experimental_enabled and tier in ("ultra", "quantum"):
+                tier = "turbo"
+                opts = dict(opts)
+                opts["scanner_tier"] = "turbo"
+                self._bus.set_scan_options(opts)
+            # Core: simple, advanced, turbo
+            core_tiers = list(CORE_TIERS)
+            if tier in core_tiers:
+                if getattr(self, "_experimental_group", None) is not None:
+                    self._experimental_group.blockSignals(True)
+                    self._experimental_group.setChecked(False)
+                    self._experimental_group.blockSignals(False)
+                idx = core_tiers.index(tier)
+                if getattr(self, "_scanner_tier_combo", None) is not None:
+                    self._scanner_tier_combo.blockSignals(True)
+                    self._scanner_tier_combo.setCurrentIndex(idx)
+                    self._scanner_tier_combo.blockSignals(False)
+            else:
+                # Experimental: ultra, quantum
+                if getattr(self, "_experimental_group", None) is not None:
+                    self._experimental_group.blockSignals(True)
+                    self._experimental_group.setChecked(True)
+                    self._experimental_group.blockSignals(False)
+                if getattr(self, "_experimental_tier_combo", None) is not None:
+                    self._experimental_tier_combo.blockSignals(True)
+                    self._experimental_tier_combo.setCurrentIndex(0 if tier == "ultra" else 1)
+                    self._experimental_tier_combo.blockSignals(False)
             # Restore Simple/Advanced mode
             scan_ui_mode = (opts.get("scan_ui_mode") or "simple").lower()
             if hasattr(self, "_simple_btn") and hasattr(self, "_advanced_btn"):

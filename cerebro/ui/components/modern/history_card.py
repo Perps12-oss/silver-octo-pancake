@@ -25,6 +25,7 @@ class HistoryCard(QFrame):
         bytes_reclaimed: str,
         parent=None,
         resumable: bool = False,
+        subtitle: Optional[str] = None,
     ):
         super().__init__(parent)
         self.setObjectName("HistoryCard")
@@ -41,6 +42,11 @@ class HistoryCard(QFrame):
         row1.addWidget(self._mode_badge, 0)
         row1.addStretch(1)
         layout.addLayout(row1)
+
+        if subtitle:
+            self._subtitle_label = QLabel(subtitle)
+            self._subtitle_label.setObjectName("historyCardSubtitle")
+            layout.addWidget(self._subtitle_label, 0)
 
         self._stats_label = QLabel(f"{deleted} deleted, {failed} failed · {bytes_reclaimed}")
         self._stats_label.setObjectName("historyCardStats")
@@ -79,6 +85,7 @@ class HistoryCard(QFrame):
             }}
             QLabel#historyCardTs {{ font-size: 12px; color: {muted}; }}
             QLabel#historyCardMode {{ font-size: 11px; padding: 2px 6px; border-radius: 4px; background: {accent}; color: white; }}
+            QLabel#historyCardSubtitle {{ font-size: 11px; color: {muted}; }}
             QLabel#historyCardStats {{ font-size: 13px; color: {text}; }}
             QPushButton {{ padding: 4px 10px; border-radius: 4px; }}
         """)

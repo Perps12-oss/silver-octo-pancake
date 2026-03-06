@@ -114,6 +114,15 @@ class StateBus(QObject):
     def __init__(self) -> None:
         super().__init__()
         self._scan_options: Dict[str, Any] = _default_scan_options_dict()
+        self._last_scan_summary: Dict[str, Any] = {}
+
+    def get_last_scan_summary(self) -> Dict[str, Any]:
+        """Return last completed scan summary for Mission Control (read-only)."""
+        return dict(self._last_scan_summary)
+
+    def set_last_scan_summary(self, summary: Dict[str, Any]) -> None:
+        """Set last completed scan summary (scan_id, groups, root, timestamp)."""
+        self._last_scan_summary = dict(summary or {})
 
     def get_scan_options(self) -> Dict[str, Any]:
         """Return current scan options (from Settings > Scanning)."""

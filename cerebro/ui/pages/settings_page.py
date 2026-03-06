@@ -411,6 +411,88 @@ class PerformanceSettingsGroup(QGroupBox):
         )
 
 
+class CleanupSettingsGroup(QGroupBox):
+    """Default deletion behavior and cleanup options (aligned with engine contract)."""
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__("🗑️ Cleanup / Deletion", parent)
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setSpacing(GROUP_SPACING)
+        layout.setContentsMargins(CARD_PADDING, CARD_PADDING, CARD_PADDING, CARD_PADDING)
+        layout.addWidget(QLabel("Default deletion method:"))
+        self._default_deletion = QComboBox()
+        self._default_deletion.addItem("Recycle Bin (recommended)", "trash")
+        self._default_deletion.addItem("Permanent delete", "permanent")
+        self._default_deletion.setToolTip("Default choice in the confirm-deletion dialog.")
+        layout.addWidget(self._default_deletion)
+
+    def load(self, value: str = "trash") -> None:
+        idx = self._default_deletion.findData(value)
+        if idx >= 0:
+            self._default_deletion.setCurrentIndex(idx)
+
+    def save(self) -> str:
+        return str(self._default_deletion.currentData() or "trash")
+
+
+class AdvancedSettingsGroup(QGroupBox):
+    """Default scanner tier, experimental features, cache directory (structure-aligned)."""
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__("🔧 Advanced / Structure", parent)
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        layout = QGridLayout(self)
+        layout.setSpacing(GRID_SPACING)
+        layout.setContentsMargins(CARD_PADDING, CARD_PADDING, CARD_PADDING, CARD_PADDING)
+        row = 0
+        layout.addWidget(QLabel("Default scanner tier:"), row, 0)
+        self._default_scanner_tier = QComboBox()
+        self._default_scanner_tier.addItems(["Simple", "Advanced", "Turbo"])
+        self._default_scanner_tier.setToolTip("Default scan strategy on Scan page.")
+        layout.addWidget(self._default_scanner_tier, row, 1)
+        row += 1
+        self._experimental_toggle = QCheckBox("Enable experimental scanners (Ultra / Quantum)")
+        self._experimental_toggle.setToolTip("Show and allow Ultra/Quantum tiers on Scan page.")
+        layout.addWidget(self._experimental_toggle, row, 0, 1, 2)
+        row += 1
+        layout.addWidget(QLabel("Cache directory:"), row, 0)
+        self._cache_dir = QLineEdit()
+        self._cache_dir.setPlaceholderText("Leave empty for default (~/.cerebro/cache)")
+        layout.addWidget(self._cache_dir, row, 1)
+        row += 1
+        layout.addWidget(QLabel("Excluded folders:"), row, 0)
+        self._excluded_folders = QLineEdit()
+        self._excluded_folders.setPlaceholderText("e.g. .git, node_modules (comma-separated)")
+        layout.addWidget(self._excluded_folders, row, 1)
+
+    def load(
+        self,
+        default_scanner_tier: str = "turbo",
+        experimental_scanners: bool = False,
+        cache_directory: str = "",
+        excluded_folders: str = "",
+    ) -> None:
+        tier = (default_scanner_tier or "turbo").lower()
+        idx = {"simple": 0, "advanced": 1, "turbo": 2}.get(tier, 2)
+        self._default_scanner_tier.setCurrentIndex(idx)
+        self._experimental_toggle.setChecked(bool(experimental_scanners))
+        self._cache_dir.setText(cache_directory or "")
+        self._excluded_folders.setText(excluded_folders or "")
+
+    def save(self) -> dict:
+        return {
+            "default_scanner_tier": ("simple", "advanced", "turbo")[self._default_scanner_tier.currentIndex()],
+            "experimental_scanners": self._experimental_toggle.isChecked(),
+            "cache_directory": self._cache_dir.text().strip(),
+            "excluded_folders": self._excluded_folders.text().strip(),
+        }
+
+
 class UISettingsGroup(QGroupBox):
     """Group box for UI-related settings"""
     
@@ -553,6 +635,8 @@ class SettingsPage(BaseStation):
         self._scan_group = ScanSettingsGroup()
         self._perf_group = PerformanceSettingsGroup()
         self._ui_group = UISettingsGroup()
+        self._cleanup_group = CleanupSettingsGroup()
+        self._advanced_group = AdvancedSettingsGroup()
         self._scan_options_panel = ScanOptionsPanel()
         self._scan_options_panel.config_changed.connect(self._on_scan_options_changed)
         self._bus.set_scan_options(self._scan_options_panel.get_config_dict())
@@ -567,16 +651,12 @@ class SettingsPage(BaseStation):
         scan_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         scan_scroll.setWidget(self._scan_options_panel)
         scanning_card.set_content(scan_scroll)
-        cleanup_placeholder = QLabel("Cleanup options (e.g. default trash vs permanent) can be added here.")
-        cleanup_placeholder.setWordWrap(True)
         cleanup_card = ContentCard()
-        cleanup_card.set_content(cleanup_placeholder)
+        cleanup_card.set_content(self._cleanup_group)
         performance_card = ContentCard()
         performance_card.set_content(self._perf_group)
-        advanced_placeholder = QLabel("Advanced options (e.g. debug logging, paths) can be added here.")
-        advanced_placeholder.setWordWrap(True)
         advanced_card = ContentCard()
-        advanced_card.set_content(advanced_placeholder)
+        advanced_card.set_content(self._advanced_group)
 
         self._stack = QStackedWidget()
         self._stack.addWidget(general_card)
@@ -607,7 +687,7 @@ class SettingsPage(BaseStation):
     def _style_groups(self) -> None:
         panel = theme_token("panel")
         line = theme_token("line")
-        for group in (self._scan_group, self._perf_group, self._ui_group):
+        for group in (self._scan_group, self._perf_group, self._ui_group, self._cleanup_group, self._advanced_group):
             group.setStyleSheet(f"""
                 QGroupBox {{
                     background: {panel};
@@ -733,23 +813,47 @@ class SettingsPage(BaseStation):
             
             # Update UI
             self._scan_group.load(self._config.scan)
-            self._perf_group.load(self._config.performance)
+            self._perf_group.load(PerformanceSettings())
             self._ui_group.load(self._config.ui)
+            opts = self._bus.get_scan_options() or {}
+            self._cleanup_group.load(str(opts.get("default_deletion_mode", "trash")))
+            excluded = opts.get("excluded_folders") or getattr(self._config.ui, "excluded_dirs", [])
+            excluded_str = format_excluded_dirs(excluded) if isinstance(excluded, (list, tuple)) else str(excluded or "")
+            self._advanced_group.load(
+                default_scanner_tier=str(opts.get("default_scanner_tier", "turbo")),
+                experimental_scanners=bool(opts.get("experimental_scanners", False)),
+                cache_directory=str(opts.get("cache_directory", "")),
+                excluded_folders=excluded_str,
+            )
             
         except Exception as e:
             # Don't crash on load failure, use defaults
             self._scan_group.load(ScanSettings())
             self._perf_group.load(PerformanceSettings())
             self._ui_group.load(UISettings())
+            self._cleanup_group.load("trash")
+            self._advanced_group.load()
     
     @Slot()
     def _save_settings(self) -> None:
-        """Save current settings to configuration file"""
+        """Save current settings to configuration file and state bus."""
         try:
             # Collect settings from UI
             self._config.scan = self._scan_group.save()
             self._config.performance = self._perf_group.save()
             self._config.ui = self._ui_group.save()
+            default_deletion = self._cleanup_group.save()
+            advanced = self._advanced_group.save()
+            # Persist structural choices to bus (Scan/Review pages read these)
+            opts = dict(self._bus.get_scan_options() or {})
+            opts["default_deletion_mode"] = default_deletion
+            opts["default_scanner_tier"] = advanced.get("default_scanner_tier", "turbo")
+            opts["experimental_scanners"] = advanced.get("experimental_scanners", False)
+            opts["cache_directory"] = advanced.get("cache_directory", "")
+            excluded = parse_excluded_dirs(advanced.get("excluded_folders", ""))
+            if excluded:
+                opts["excluded_folders"] = excluded
+            self._bus.set_scan_options(opts)
             
             # Import config module
             from cerebro.services.config import load_config, save_config  # type: ignore

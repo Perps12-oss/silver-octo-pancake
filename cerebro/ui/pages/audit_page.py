@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from cerebro.ui.components.modern import PageHeader, PageScaffold
+from cerebro.ui.components.modern._tokens import token as theme_token
 from cerebro.ui.pages.base_station import BaseStation
 from cerebro.ui.state_bus import get_state_bus
 
@@ -294,57 +295,54 @@ class ReportAuditWorker(AuditWorker):
 
 
 class HistoryAuditWorker(AuditWorker):
-    """Background worker for deletion history audits."""
+    """Background worker for deletion history audits. Uses HistoryStore (engine audit trail)."""
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(AuditType.DELETION_HISTORY, parent)
 
     def _run_audit(self, progress_cb: Callable[[int, str], None]) -> AuditResult:
         progress_cb(0, "Scanning deletion history...")
-        
-        deletion_records = []
+        records_summary: list[dict[str, Any]] = []
         total_deleted = 0
-        total_size_recovered = 0
-        
+        total_failed = 0
+        total_bytes = 0
         try:
-            from cerebro.services.history_manager import get_history_manager
-            history = get_history_manager()
-            
-            progress_cb(30, "Loading scan history...")
-            recent_scans = history.get_recent(limit=50)
-            
+            from cerebro.history.store import HistoryStore
+            store = HistoryStore()
+            progress_cb(30, "Loading audit trail...")
+            records = store.get_deletion_history(limit=100)
             progress_cb(50, "Analyzing deletion records...")
-            for scan in recent_scans:
-                metadata = scan.get("metadata", {})
-                deleted_files = metadata.get("deleted_files", [])
-                if deleted_files:
-                    for file_info in deleted_files:
-                        deletion_records.append({
-                            "scan_id": scan.get("scan_id", "unknown"),
-                            "timestamp": scan.get("timestamp", ""),
-                            "file_path": file_info.get("path", ""),
-                            "size_bytes": file_info.get("size", 0),
-                        })
-                        total_deleted += 1
-                        total_size_recovered += file_info.get("size", 0)
-            
-            progress_cb(80, f"Found {total_deleted} deletion records")
+            for r in records:
+                strategy = (r.policy or {}).get("scanner_tier") or (r.policy or {}).get("mode") or "—"
+                records_summary.append({
+                    "scan_id": r.scan_id,
+                    "strategy": str(strategy),
+                    "groups": r.groups,
+                    "deleted": r.deleted,
+                    "failed": r.failed,
+                    "bytes_reclaimed": r.bytes_reclaimed,
+                    "mode": r.mode,
+                    "source": r.source,
+                })
+                total_deleted += r.deleted
+                total_failed += r.failed
+                total_bytes += r.bytes_reclaimed
+            progress_cb(80, f"Found {len(records)} runs, {total_deleted} deleted, {total_failed} failed")
         except Exception as e:
             progress_cb(80, f"Error: {e}")
-        
         progress_cb(100, "Deletion history loaded.")
-        
-        size_mb = total_size_recovered / (1024 * 1024)
-        message = f"Found {total_deleted} deleted files ({size_mb:.2f} MB recovered)"
-        
+        size_mb = total_bytes / (1024 * 1024)
+        message = f"{len(records_summary)} run(s) · {total_deleted} deleted, {total_failed} failed · {size_mb:.2f} MB reclaimed"
         return AuditResult(
             audit_type=self._audit_type,
             status=AuditStatus.COMPLETED,
             message=message,
             details={
-                "deletion_records": deletion_records[:100],  # Limit to 100 for display
+                "records": records_summary,
                 "total_deleted": total_deleted,
-                "total_size_recovered_bytes": total_size_recovered
+                "total_failed": total_failed,
+                "total_bytes_recovered": total_bytes,
+                "report_export": "Export full history via History page → Export",
             },
             timestamp=datetime.now(),
         )
@@ -779,7 +777,7 @@ class StatisticsPanel(QGroupBox):
     def _create_stat_label(self) -> QLabel:
         """Create a statistics value label"""
         label = QLabel("—")
-        label.setStyleSheet("font-weight: 700; color: #5a8dff;")
+        label.setStyleSheet(f"font-weight: 700; color: {theme_token('accent')};")
         return label
     
     def _apply_style(self) -> None:
@@ -1103,7 +1101,15 @@ class AuditPage(BaseStation):
                 # Display detailed results based on audit type
                 details = result.details
                 
-                if result.audit_type == AuditType.INTEGRITY_CHECK:
+                if result.audit_type == AuditType.DELETION_HISTORY:
+                    for rec in details.get("records", [])[:30]:
+                        self._console.append_log(
+                            f"  scan_id={rec.get('scan_id', '—')} | strategy={rec.get('strategy', '—')} | "
+                            f"groups={rec.get('groups', 0)} | deleted={rec.get('deleted', 0)} | "
+                            f"failed={rec.get('failed', 0)} | {rec.get('mode', '—')}"
+                        )
+                    self._console.append_log(f"  Report export: {details.get('report_export', '—')}")
+                elif result.audit_type == AuditType.INTEGRITY_CHECK:
                     self._console.append_log(f"✓ Checked {details.get('checked_items', 0)} items")
                     issues = details.get("issues", [])
                     if issues:
@@ -1122,8 +1128,10 @@ class AuditPage(BaseStation):
                 
                 elif result.audit_type == AuditType.DELETION_HISTORY:
                     total = details.get("total_deleted", 0)
-                    size_mb = details.get("total_size_recovered_bytes", 0) / (1024 * 1024)
-                    self._console.append_log(f"🗑️ {total} files deleted ({size_mb:.1f} MB recovered)")
+                    failed = details.get("total_failed", 0)
+                    bytes_rec = details.get("total_bytes_recovered", 0) or details.get("total_size_recovered_bytes", 0)
+                    size_mb = bytes_rec / (1024 * 1024)
+                    self._console.append_log(f"🗑️ {total} deleted, {failed} failed · {size_mb:.1f} MB reclaimed")
                 
                 elif result.audit_type == AuditType.VERIFY_RESULTS:
                     verified = details.get("verified_count", 0)

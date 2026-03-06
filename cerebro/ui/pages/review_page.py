@@ -21,12 +21,12 @@ from enum import Enum, IntEnum
 from functools import partial
 from pathlib import Path
 from PySide6.QtCore import QItemSelectionModel
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from PySide6.QtCore import QItemSelectionModel
 from PySide6.QtCore import (
     Qt, QSize, QRect, QPoint, QEvent, QTimer, Signal, Slot,
     QRunnable, QThreadPool, QObject, QMutex, QMutexLocker,
-    QPropertyAnimation, QEasingCurve
+    QPropertyAnimation, QEasingCurve, QAbstractListModel, QModelIndex,
 )
 from PySide6.QtGui import (
     QPixmap, QKeySequence, QShortcut, QKeyEvent, QFontMetrics,
@@ -40,10 +40,12 @@ from PySide6.QtWidgets import (
     QHeaderView, QAbstractItemView, QMessageBox, QInputDialog,
     QProgressBar, QTextEdit, QGroupBox, QToolButton,
     QGraphicsDropShadowEffect, QApplication, QLineEdit, QRadioButton,
-    QFileDialog,
+    QFileDialog, QListView, QStyleOptionViewItem, QStyledItemDelegate,
 )
+from PySide6.QtGui import QBrush
 
 from cerebro.ui.components.modern import PageScaffold, StickyActionBar
+from cerebro.ui.components.modern._tokens import token as theme_token
 from cerebro.ui.pages.base_station import BaseStation
 from cerebro.ui.state_bus import get_state_bus
 from cerebro.ui.theme_engine import get_theme_manager
@@ -117,6 +119,17 @@ def truncate_text(text: str, max_len: int, ellipsis: str = "...") -> str:
     if len(text) <= max_len:
         return text
     return text[: max(0, max_len - len(ellipsis))] + ellipsis
+
+def _compute_group_size(paths: List[str]) -> int:
+    """Sum file sizes for a list of paths. Used when recomputing group recoverable_bytes."""
+    total = 0
+    for p in paths:
+        try:
+            total += os.path.getsize(p)
+        except OSError:
+            pass
+    return total
+
 
 def file_emoji(path: str) -> str:
     ext = Path(path).suffix.lower()
@@ -257,7 +270,7 @@ class CleanupProgressDialog(QDialog):
 
         self.subtitle = QLabel(f"Processing {self.total_files} files")
         self.subtitle.setAlignment(Qt.AlignCenter)
-        self.subtitle.setStyleSheet("font-size: 14px; color: #888;")
+        self.subtitle.setStyleSheet(f"font-size: 14px; color: {theme_token('muted')};")
         layout.addWidget(self.subtitle)
 
         self.progress = QProgressBar()
@@ -270,16 +283,16 @@ class CleanupProgressDialog(QDialog):
 
         stats = QHBoxLayout()
         self.success_label = QLabel("✓ Success: 0")
-        self.success_label.setStyleSheet("color: #22c55e; font-weight: bold; font-size: 13px;")
+        self.success_label.setStyleSheet(f"color: {theme_token('ok')}; font-weight: bold; font-size: 13px;")
         self.failed_label = QLabel("✗ Failed: 0")
-        self.failed_label.setStyleSheet("color: #ef4444; font-weight: bold; font-size: 13px;")
+        self.failed_label.setStyleSheet(f"color: {theme_token('danger')}; font-weight: bold; font-size: 13px;")
 
         stats.addWidget(self.success_label)
         stats.addWidget(self.failed_label)
         layout.addLayout(stats)
 
         self.current_file = QLabel("Starting...")
-        self.current_file.setStyleSheet("color: #666; font-size: 11px;")
+        self.current_file.setStyleSheet(f"color: {theme_token('muted')}; font-size: 11px;")
         self.current_file.setWordWrap(True)
         self.current_file.setMaximumHeight(40)
         layout.addWidget(self.current_file)
@@ -310,18 +323,18 @@ class CleanupProgressDialog(QDialog):
         if filename:
             self.current_file.setText(f"Current: {truncate_text(filename, 50)}")
 
-        self.progress.setStyleSheet("""
-            QProgressBar {
-                border: 2px solid #3b82f6;
+        self.progress.setStyleSheet(f"""
+            QProgressBar {{
+                border: 2px solid {theme_token('accent')};
                 border-radius: 15px;
                 text-align: center;
                 font-weight: bold;
-            }
-            QProgressBar::chunk {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                    stop:0 #22c55e, stop:0.5 #3b82f6, stop:1 #8b5cf6);
+            }}
+            QProgressBar::chunk {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 {theme_token('ok')}, stop:0.5 {theme_token('accent')}, stop:1 {theme_token('panel')});
                 border-radius: 13px;
-            }
+            }}
         """)
         QApplication.processEvents()
 
@@ -330,18 +343,16 @@ class CleanupProgressDialog(QDialog):
         self.subtitle.setText(f"Moved {success_count} files to Trash")
         self.progress.setValue(self.total_files)
         self.cancel_btn.setText("Close")
-        self.cancel_btn.setStyleSheet("""
-            QPushButton {
-                background: #22c55e;
+        self.cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {theme_token('ok')};
                 color: white;
                 border: none;
                 border-radius: 8px;
                 font-weight: bold;
                 font-size: 14px;
-            }
-            QPushButton:hover {
-                background: #16a34a;
-            }
+            }}
+            QPushButton:hover {{ opacity: 0.9; }}
         """)
 
     def _on_cancel(self):
@@ -396,11 +407,15 @@ class _ConfirmDeleteDialog(QDialog):
     MODE_TRASH = "trash"
     MODE_PERMANENT = "permanent"
 
-    def __init__(self, file_count: int, total_bytes: int, blocked_count: int = 0, parent=None):
+    def __init__(self, file_count: int, total_bytes: int, blocked_count: int = 0, initial_mode: str = "trash", parent=None):
         super().__init__(parent)
         self._mode = self.MODE_TRASH
         self._accepted = False
         self._build(file_count, total_bytes, blocked_count)
+        if (initial_mode or "trash").strip().lower() == self.MODE_PERMANENT:
+            self._perm_rb.setChecked(True)
+            self._trash_rb.setChecked(False)
+            self._on_mode_toggled(False)
         self.apply_theme()
         if parent:
             geo = parent.geometry()
@@ -438,7 +453,7 @@ class _ConfirmDeleteDialog(QDialog):
                 f"ℹ️  {blocked_count} item(s) excluded by the keep-at-least-one-copy safety rule."
             )
             warn.setWordWrap(True)
-            warn.setStyleSheet("color: #f59e0b; font-size: 12px;")
+            warn.setStyleSheet(f"color: {theme_token('muted')}; font-size: 12px;")
             layout.addWidget(warn)
 
         sep = QFrame()
@@ -454,7 +469,7 @@ class _ConfirmDeleteDialog(QDialog):
         self._trash_rb.setChecked(True)
         self._trash_rb.setStyleSheet("font-size: 13px; padding: 4px;")
         self._perm_rb = QRadioButton("⚠️  Delete permanently  (cannot be undone)")
-        self._perm_rb.setStyleSheet("font-size: 13px; padding: 4px; color: #ef4444;")
+        self._perm_rb.setStyleSheet(f"font-size: 13px; padding: 4px; color: {theme_token('danger')};")
         layout.addWidget(self._trash_rb)
         layout.addWidget(self._perm_rb)
 
@@ -464,7 +479,7 @@ class _ConfirmDeleteDialog(QDialog):
         confirm_layout.setSpacing(6)
         conf_lbl = QLabel('Type <b>DELETE</b> to confirm permanent deletion:')
         conf_lbl.setTextFormat(Qt.RichText)
-        conf_lbl.setStyleSheet("color: #ef4444; font-size: 12px;")
+        conf_lbl.setStyleSheet(f"color: {theme_token('danger')}; font-size: 12px;")
         self._confirm_edit = QLineEdit()
         self._confirm_edit.setFixedHeight(36)
         self._confirm_edit.setPlaceholderText("DELETE")
@@ -499,9 +514,9 @@ class _ConfirmDeleteDialog(QDialog):
             self._mode = self.MODE_PERMANENT
             self._delete_btn.setText("Delete Permanently")
             self._delete_btn.setStyleSheet(
-                "QPushButton { background: #dc2626; color: white; border-radius: 8px; "
+                f"QPushButton {{ background: {theme_token('danger')}; color: white; border-radius: 8px; "
                 "font-weight: bold; padding: 8px 20px; }"
-                "QPushButton:hover { background: #b91c1c; }"
+                "QPushButton:hover { opacity: 0.9; }"
             )
         else:
             self._mode = self.MODE_TRASH
@@ -599,30 +614,25 @@ class FloatingDeleteButton(QPushButton):
         QTimer.singleShot(200, lambda: self._pulse_anim.setEndValue(current))
 
     def _apply_style(self):
-        self.setStyleSheet("""
-            FloatingDeleteButton {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #ef4444, stop:1 #dc2626);
+        d = theme_token("danger")
+        m = theme_token("muted")
+        self.setStyleSheet(f"""
+            FloatingDeleteButton {{
+                background: {d};
                 color: white;
-                border: 3px solid #fca5a5;
+                border: 2px solid {m};
                 border-radius: 30px;
                 font-weight: bold;
                 font-size: 13px;
                 padding: 8px;
-            }
-            FloatingDeleteButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #f87171, stop:1 #ef4444);
-                border-color: #fecaca;
-            }
-            FloatingDeleteButton:disabled {
-                background: #4b5563;
-                border-color: #6b7280;
-                color: #9ca3af;
-            }
-            FloatingDeleteButton:pressed {
-                background: #b91c1c;
-            }
+            }}
+            FloatingDeleteButton:hover {{ opacity: 0.95; }}
+            FloatingDeleteButton:disabled {{
+                background: {m};
+                border-color: {m};
+                color: {theme_token('text')};
+            }}
+            FloatingDeleteButton:pressed {{ opacity: 0.9; }}
         """)
 
     def mousePressEvent(self, event):
@@ -671,6 +681,127 @@ def extract_group_data(group: Any, idx: int = 0) -> GroupData:
 
 
 # ==============================================================================
+# VIRTUALIZED GROUP LIST (model + delegate)
+# ==============================================================================
+
+GroupIdRole = Qt.UserRole
+GroupDataRole = Qt.UserRole + 1
+CheckedRole = Qt.UserRole + 2
+
+
+class GroupListModel(QAbstractListModel):
+    """List model for virtualized group list. Holds (group_id, GroupData) and checked state per group."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._rows: List[Tuple[int, GroupData]] = []
+        self._checked: Dict[int, bool] = {}
+        self._on_checked_callback: Optional[Callable[[int, bool], None]] = None
+
+    def set_checked_callback(self, cb: Callable[[int, bool], None]) -> None:
+        self._on_checked_callback = cb
+
+    def set_groups(self, filtered_groups: List[GroupData], keep_states: Dict[int, Dict[str, bool]]) -> None:
+        self.beginResetModel()
+        self._rows = [(g.group_id, g) for g in filtered_groups]
+        self._checked = {}
+        for g in filtered_groups:
+            keep_map = keep_states.get(g.group_id, {})
+            all_delete = all(not keep_map.get(_norm_path(p), True) for p in g.paths)
+            self._checked[g.group_id] = all_delete
+        self.endResetModel()
+
+    def rowCount(self, parent=QModelIndex()) -> int:
+        if parent.isValid():
+            return 0
+        return len(self._rows)
+
+    def data(self, index: QModelIndex, role: int = Qt.DisplayRole) -> Any:
+        if not index.isValid() or index.row() < 0 or index.row() >= len(self._rows):
+            return None
+        group_id, g = self._rows[index.row()]
+        if role == Qt.DisplayRole:
+            return f"Group #{group_id + 1}  ·  {g.file_count} files  ·  {g.recoverable_formatted}"
+        if role == GroupIdRole:
+            return group_id
+        if role == GroupDataRole:
+            return g
+        if role == CheckedRole:
+            return self._checked.get(group_id, False)
+        return None
+
+    def setData(self, index: QModelIndex, value: Any, role: int = Qt.EditRole) -> bool:
+        if not index.isValid() or role != CheckedRole:
+            return False
+        group_id = self.data(index, GroupIdRole)
+        if group_id is None:
+            return False
+        self._checked[group_id] = bool(value)
+        self.dataChanged.emit(index, index, [CheckedRole])
+        if self._on_checked_callback:
+            self._on_checked_callback(group_id, bool(value))
+        return True
+
+    def group_at_row(self, row: int) -> Optional[Tuple[int, GroupData]]:
+        if 0 <= row < len(self._rows):
+            return self._rows[row]
+        return None
+
+
+class GroupListDelegate(QStyledItemDelegate):
+    """Paints one row: checkbox, icon, Group #n, details. Handles checkbox toggle."""
+
+    CHECKBOX_WIDTH = 24
+    ICON_SIZE = 40
+    PAD = 12
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        if not index.isValid():
+            return
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        painter.save()
+        c = ThemeHelper.colors()
+        bg = c.get("surface", "#151922")
+        if opt.state & opt.State_Selected:
+            bg = c.get("accent", "#3b82f6")
+        painter.fillRect(opt.rect, QColor(bg))
+        text_color = "white" if (opt.state & opt.State_Selected) else c.get("text", "#e7ecf2")
+        painter.setPen(QColor(text_color))
+        x = opt.rect.x() + self.PAD
+        y = opt.rect.y() + (opt.rect.height() - self.CHECKBOX_WIDTH) // 2
+        checked = index.data(CheckedRole)
+        # Checkbox rect
+        cb_rect = QRect(x, y, self.CHECKBOX_WIDTH, self.CHECKBOX_WIDTH)
+        painter.drawRect(cb_rect)
+        if checked:
+            painter.drawLine(cb_rect.topLeft(), cb_rect.bottomRight())
+            painter.drawLine(cb_rect.topRight(), cb_rect.bottomLeft())
+        x += self.CHECKBOX_WIDTH + 8
+        g = index.data(GroupDataRole)
+        icon_str = file_emoji(g.paths[0]) if g and g.paths else "📄"
+        painter.drawText(QRect(x, opt.rect.y(), self.ICON_SIZE, opt.rect.height()), Qt.AlignCenter, icon_str)
+        x += self.ICON_SIZE + 8
+        display = index.data(Qt.DisplayRole) or ""
+        painter.drawText(QRect(x, opt.rect.y(), opt.rect.width() - (x - opt.rect.x()) - self.PAD, opt.rect.height()),
+                        Qt.AlignLeft | Qt.AlignVCenter, display)
+        painter.restore()
+
+    def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
+        return QSize(option.rect.width(), 64)
+
+    def editorEvent(self, event: QEvent, model: QAbstractListModel, option: QStyleOptionViewItem, index: QModelIndex) -> bool:
+        if event.type() == QEvent.MouseButtonPress and index.isValid():
+            x = option.rect.x() + self.PAD
+            cb_rect = QRect(x, option.rect.y() + (option.rect.height() - self.CHECKBOX_WIDTH) // 2,
+                            self.CHECKBOX_WIDTH, self.CHECKBOX_WIDTH)
+            if cb_rect.contains(event.pos()):
+                model.setData(index, not index.data(CheckedRole), CheckedRole)
+                return True
+        return super().editorEvent(event, model, option, index)
+
+
+# ==============================================================================
 # DUAL PANE COMPARISON
 # ==============================================================================
 
@@ -680,8 +811,9 @@ class DualPaneComparison(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("DualPaneComparison")
-        self._build()
         self._current_paths: List[str] = []
+        self._thumbnail_loader: Optional[Any] = None
+        self._build()
 
     def _build(self):
         layout = QHBoxLayout(self)
@@ -698,11 +830,11 @@ class DualPaneComparison(QFrame):
 
         self.similarity_label = QLabel("100%")
         self.similarity_label.setAlignment(Qt.AlignCenter)
-        self.similarity_label.setStyleSheet("font-size: 28px; font-weight: bold; color: #22c55e;")
+        self.similarity_label.setStyleSheet(f"font-size: 28px; font-weight: bold; color: {theme_token('ok')};")
 
         self.similarity_text = QLabel("Similarity")
         self.similarity_text.setAlignment(Qt.AlignCenter)
-        self.similarity_text.setStyleSheet("font-size: 11px; color: #888;")
+        self.similarity_text.setStyleSheet(f"font-size: 11px; color: {theme_token('muted')};")
 
         cl.addStretch()
         cl.addWidget(self.similarity_label)
@@ -728,7 +860,7 @@ class DualPaneComparison(QFrame):
 
         img_container = QFrame()
         img_container.setMinimumSize(200, 200)
-        img_container.setStyleSheet("background: #0a0a0a; border-radius: 8px;")
+        img_container.setStyleSheet(f"background: {theme_token('bg')}; border-radius: 8px;")
         img_layout = QVBoxLayout(img_container)
         img_layout.setContentsMargins(4, 4, 4, 4)
 
@@ -747,7 +879,7 @@ class DualPaneComparison(QFrame):
         info = QLabel("No file selected")
         info.setAlignment(Qt.AlignCenter)
         info.setObjectName(f"info_{label_text}")
-        info.setStyleSheet("font-size: 11px; color: #aaa; padding: 4px;")
+        info.setStyleSheet(f"font-size: 11px; color: {theme_token('muted')}; padding: 4px;")
         layout.addWidget(info)
 
         if label_text == "Original":
@@ -778,11 +910,11 @@ class DualPaneComparison(QFrame):
         self.similarity_label.setText(f"{similarity:.0f}%")
 
         if similarity >= 95:
-            color = "#22c55e"
+            color = theme_token("ok")
         elif similarity >= 80:
-            color = "#eab308"
+            color = theme_token("muted")
         else:
-            color = "#ef4444"
+            color = theme_token("danger")
         self.similarity_label.setStyleSheet(f"font-size: 28px; font-weight: bold; color: {color};")
 
         if len(paths) >= 1:
@@ -790,7 +922,39 @@ class DualPaneComparison(QFrame):
         if len(paths) >= 2:
             self._load_image(self.right_img, self.right_info, paths[1])
 
+    def set_thumbnail_loader(self, loader: Optional[Any]) -> None:
+        """Use async loader for images so UI stays responsive (lazy thumbnails)."""
+        self._thumbnail_loader = loader
+        if loader and hasattr(loader, "thumbnail_ready"):
+            try:
+                loader.thumbnail_ready.disconnect(self._on_thumbnail_ready)
+            except (TypeError, RuntimeError):
+                pass
+            loader.thumbnail_ready.connect(self._on_thumbnail_ready)
+
+    @Slot(str, QPixmap)
+    def _on_thumbnail_ready(self, path: str, pix: QPixmap) -> None:
+        if not path or pix.isNull():
+            return
+        if path in (self._current_paths or []):
+            idx = self._current_paths.index(path)
+            label = self.left_img if idx == 0 else self.right_img
+            info = self.left_info if idx == 0 else self.right_info
+            scaled = pix.scaled(280, 280, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            label.setPixmap(scaled)
+            try:
+                size = os.path.getsize(path) if os.path.exists(path) else 0
+                dims = f"{pix.width()}×{pix.height()}"
+                info.setText(f"{Path(path).name}\n{dims} | {format_bytes(size)}")
+            except Exception:
+                info.setText(Path(path).name)
+
     def _load_image(self, img_label: QLabel, info_label: QLabel, path: str):
+        if is_image_file(path) and self._thumbnail_loader:
+            self._thumbnail_loader.request(path, QSize(280, 280))
+            img_label.setText("…")
+            info_label.setText(Path(path).name)
+            return
         if is_image_file(path):
             pix = QPixmap(path)
             if not pix.isNull():
@@ -840,7 +1004,7 @@ class GroupListItem(QFrame):
         icon = QLabel(file_emoji(self.group_data.paths[0]) if self.group_data.paths else "📄")
         icon.setFixedSize(40, 40)
         icon.setAlignment(Qt.AlignCenter)
-        icon.setStyleSheet("font-size: 20px; background: rgba(255,255,255,0.1); border-radius: 8px;")
+        icon.setStyleSheet(f"font-size: 20px; background: {theme_token('line')}; border-radius: 8px;")
         layout.addWidget(icon)
 
         info = QVBoxLayout()
@@ -850,7 +1014,7 @@ class GroupListItem(QFrame):
         name.setStyleSheet("font-weight: bold; font-size: 13px;")
 
         details = QLabel(f"{self.group_data.file_count} files • {self.group_data.recoverable_formatted}")
-        details.setStyleSheet("font-size: 11px; color: #888;")
+        details.setStyleSheet(f"font-size: 11px; color: {theme_token('muted')};")
 
         info.addWidget(name)
         info.addWidget(details)
@@ -860,7 +1024,7 @@ class GroupListItem(QFrame):
             sim = QLabel(f"{self.group_data.similarity:.0f}%")
             sim.setAlignment(Qt.AlignCenter)
             sim.setFixedSize(48, 24)
-            color = "#22c55e" if self.group_data.similarity >= 95 else "#eab308"
+            color = theme_token("ok") if self.group_data.similarity >= 95 else theme_token("muted")
             sim.setStyleSheet(f"""
                 background: {color};
                 color: white;
@@ -923,8 +1087,14 @@ class ReviewPage(BaseStation):
 
         self._current_filter = "All Files"
         self._progress_dialog = None
+        # Post-deletion result (engine contract): show banner + failure details
+        self._last_deletion_deleted: int = 0
+        self._last_deletion_failed: List[Tuple[str, str]] = []
+        self._deletion_result_banner: Optional[QFrame] = None
 
         self._thumb_loader = AsyncThumbnailLoader(self)
+        self._preview_pending_path: Optional[str] = None
+        self._thumb_loader.thumbnail_ready.connect(self._on_preview_thumbnail_ready)
 
         self._build()
         self._setup_keyboard_shortcuts()
@@ -941,6 +1111,22 @@ class ReviewPage(BaseStation):
         # Step bar
         self.step_bar = self._build_step_bar()
         root.addWidget(self.step_bar)
+
+        # Post-delete result banner (engine contract: what was deleted / failed)
+        self._deletion_result_banner = QFrame()
+        self._deletion_result_banner.setObjectName("DeletionResultBanner")
+        self._deletion_result_banner.setVisible(False)
+        banner_layout = QHBoxLayout(self._deletion_result_banner)
+        banner_layout.setContentsMargins(16, 10, 16, 10)
+        self._deletion_result_label = QLabel("")
+        self._deletion_result_label.setStyleSheet("font-weight: bold; font-size: 13px;")
+        banner_layout.addWidget(self._deletion_result_label, 1)
+        self._view_failures_btn = QPushButton("View failures")
+        self._view_failures_btn.setCursor(Qt.PointingHandCursor)
+        self._view_failures_btn.clicked.connect(self._show_failure_details_dialog)
+        self._view_failures_btn.setVisible(False)
+        banner_layout.addWidget(self._view_failures_btn)
+        root.addWidget(self._deletion_result_banner)
 
         # Main content (splitter goes inside scaffold, not root)
         content = QSplitter(Qt.Horizontal)
@@ -1008,9 +1194,9 @@ class ReviewPage(BaseStation):
             step.setStyleSheet(f"""
                 font-weight: {'bold' if active else 'normal'};
                 font-size: 13px;
-                color: {'#3b82f6' if active else '#888'};
+                color: {theme_token('accent') if active else theme_token('muted')};
                 padding: 4px 12px;
-                background: {'rgba(59,130,246,0.1)' if active else 'transparent'};
+                background: {theme_token('panel') if active else 'transparent'};
                 border-radius: 16px;
             """)
             layout.addWidget(step)
@@ -1018,7 +1204,7 @@ class ReviewPage(BaseStation):
         layout.addStretch()
 
         self.quick_stats = QLabel("0 duplicates found")
-        self.quick_stats.setStyleSheet("font-size: 13px; color: #aaa;")
+        self.quick_stats.setStyleSheet(f"font-size: 13px; color: {theme_token('muted')};")
         layout.addWidget(self.quick_stats)
 
         return bar
@@ -1049,21 +1235,23 @@ class ReviewPage(BaseStation):
         filter_layout.addWidget(self.filter_combo, 1)
         layout.addLayout(filter_layout)
 
-        self.group_list = QScrollArea()
-        self.group_list.setWidgetResizable(True)
-        self.group_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        self.group_list_widget = QWidget()
-        self.group_list_layout = QVBoxLayout(self.group_list_widget)
-        self.group_list_layout.setAlignment(Qt.AlignTop)
-        self.group_list_layout.setSpacing(8)
-
-        self.group_list.setWidget(self.group_list_widget)
-        layout.addWidget(self.group_list, 1)
+        # Virtualized group list (QListView + model + delegate)
+        self._group_list_model = GroupListModel(self)
+        self._group_list_model.set_checked_callback(self._on_virtual_group_checked)
+        self._group_list_view = QListView()
+        self._group_list_view.setObjectName("GroupListView")
+        self._group_list_view.setModel(self._group_list_model)
+        self._group_list_view.setItemDelegate(GroupListDelegate(self))
+        self._group_list_view.setUniformItemSizes(True)
+        self._group_list_view.setSelectionMode(QAbstractItemView.SingleSelection)
+        self._group_list_view.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self._group_list_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._group_list_view.selectionModel().selectionChanged.connect(self._on_group_list_selection_changed)
+        layout.addWidget(self._group_list_view, 1)
 
         self.left_summary = QLabel("0 groups")
         self.left_summary.setAlignment(Qt.AlignCenter)
-        self.left_summary.setStyleSheet("font-size: 12px; color: #888; padding: 8px;")
+        self.left_summary.setStyleSheet(f"font-size: 12px; color: {theme_token('muted')}; padding: 8px;")
         layout.addWidget(self.left_summary)
 
         return panel
@@ -1095,6 +1283,7 @@ class ReviewPage(BaseStation):
 
         self.comparison = DualPaneComparison()
         self.comparison.file_selected.connect(self._on_comparison_keep_selected)
+        self.comparison.set_thumbnail_loader(getattr(self, "_thumb_loader", None))
         layout.addWidget(self.comparison, 1)
 
         self.file_list_label = QLabel("Files in this group (Space to toggle, 1-5 to keep specific):")
@@ -1127,7 +1316,7 @@ class ReviewPage(BaseStation):
 
         self.preview_frame = QFrame()
         self.preview_frame.setMinimumSize(260, 260)
-        self.preview_frame.setStyleSheet("background: #0a0a0a; border-radius: 12px;")
+        self.preview_frame.setStyleSheet(f"background: {theme_token('bg')}; border-radius: 12px;")
         preview_layout = QVBoxLayout(self.preview_frame)
 
         self.preview_label = QLabel("No preview")
@@ -1171,15 +1360,15 @@ class ReviewPage(BaseStation):
             btn.clicked.connect(callback)
             btn.setStyleSheet("""
                 QPushButton {
-                    background: rgba(59,130,246,0.15);
-                    border: 1px solid rgba(59,130,246,0.3);
+                    background: {theme_token('panel')};
+                    border: 1px solid {theme_token('accent')};
                     border-radius: 8px;
                     padding: 8px;
                     text-align: left;
-                }
-                QPushButton:hover {
-                    background: rgba(59,130,246,0.25);
-                }
+                }}
+                QPushButton:hover {{
+                    border-color: {theme_token('accent')};
+                }}
             """)
             smart_layout.addWidget(btn)
 
@@ -1201,12 +1390,17 @@ class ReviewPage(BaseStation):
 
         layout.addStretch()
 
+        # Deletion summary strip: selected for delete vs protected (keeper)
+        self.deletion_summary_label = QLabel("Selected for delete: 0  ·  Protected: 0")
+        self.deletion_summary_label.setStyleSheet(f"color: {theme_token('muted')}; font-size: 12px;")
+        layout.addWidget(self.deletion_summary_label)
+
         self.selection_stats = QLabel("0 files selected for deletion (0 B)")
-        self.selection_stats.setStyleSheet("font-weight: bold; color: #ef4444;")
+        self.selection_stats.setStyleSheet(f"font-weight: bold; color: {theme_token('danger')};")
         layout.addWidget(self.selection_stats)
 
         hint = QLabel("Shortcuts: ←→ Navigate | Space Toggle | Delete Confirm | 1-5 Keep")
-        hint.setStyleSheet("font-size: 10px; color: #666; margin-left: 20px;")
+        hint.setStyleSheet(f"font-size: 10px; color: {theme_token('muted')}; margin-left: 20px;")
         layout.addWidget(hint)
 
         return bar
@@ -1275,28 +1469,33 @@ class ReviewPage(BaseStation):
         return None
 
     def _populate_group_list(self):
-        while self.group_list_layout.count():
-            item = self.group_list_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        """Refresh virtualized list model and sync selection to current group."""
+        self._group_list_model.set_groups(self._filtered_groups, self._keep_states)
+        if self._filtered_groups and 0 <= self._current_group_idx < len(self._filtered_groups):
+            self._group_list_view.setCurrentIndex(self._group_list_model.index(self._current_group_idx, 0))
+        else:
+            self._group_list_view.clearSelection()
 
-        for group in self._filtered_groups:
-            item = GroupListItem(group.group_id, group)
-            item.clicked.connect(self._on_group_clicked)
-            item.checkbox_changed.connect(self._on_group_checkbox_changed)
+    def _on_virtual_group_checked(self, group_id: int, checked: bool) -> None:
+        """Callback when checkbox is toggled in virtualized list; sync _keep_states and stats."""
+        self._on_group_checkbox_changed(group_id, checked)
 
-            keep_map = self._keep_states.get(group.group_id, {})
-            all_delete = all(not keep_map.get(_norm_path(p), True) for p in group.paths)
-            item.checkbox.setChecked(all_delete)
-
-            self.group_list_layout.addWidget(item)
-
-        self.group_list_layout.addStretch()
+    def _on_group_list_selection_changed(self) -> None:
+        """Sync _current_group_idx from list selection and refresh center/right panels."""
+        idx = self._group_list_view.currentIndex()
+        if idx.isValid():
+            row = idx.row()
+            if 0 <= row < len(self._filtered_groups):
+                self._current_group_idx = row
+                self._update_display()
 
     def _update_display(self):
         group = self._get_current_group()
         if not group:
             return
+        # Keep list view selection in sync with _current_group_idx (e.g. after Prev/Next)
+        if self._group_list_view.currentIndex().row() != self._current_group_idx:
+            self._group_list_view.setCurrentIndex(self._group_list_model.index(self._current_group_idx, 0))
 
         keep_map = self._keep_states.get(group.group_id, {})
 
@@ -1317,10 +1516,7 @@ class ReviewPage(BaseStation):
         if preview_file:
             self._update_preview(preview_file)
 
-        for i in range(self.group_list_layout.count()):
-            item = self.group_list_layout.itemAt(i)
-            if item and isinstance(item.widget(), GroupListItem):
-                item.widget().set_selected(item.widget().group_id == group.group_id)
+        # List view selection already reflects current group; no need to set_selected on items.
 
     def _populate_file_table(self, group, keep_map):
         self.file_table.setRowCount(0)
@@ -1350,8 +1546,20 @@ class ReviewPage(BaseStation):
 
         self.file_table.resizeColumnsToContents()
 
+    @Slot(str, QPixmap)
+    def _on_preview_thumbnail_ready(self, path: str, pix: QPixmap) -> None:
+        if path == self._preview_pending_path and not pix.isNull():
+            scaled = pix.scaled(240, 240, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.preview_label.setPixmap(scaled)
+            self.preview_label.setStyleSheet("")
+
     def _update_preview(self, file_path: str):
-        if is_image_file(file_path):
+        self._preview_pending_path = file_path or None
+        if is_image_file(file_path) and self._thumb_loader:
+            self._thumb_loader.request(file_path, QSize(240, 240))
+            self.preview_label.setText("…")
+            self.preview_label.setStyleSheet("font-size: 48px;")
+        elif is_image_file(file_path):
             pix = QPixmap(file_path)
             if not pix.isNull():
                 scaled = pix.scaled(240, 240, Qt.KeepAspectRatio, Qt.SmoothTransformation)
@@ -1394,9 +1602,13 @@ class ReviewPage(BaseStation):
                     except:
                         pass
 
+        keeper_count = total_files - delete_count
         self.quick_stats.setText(f"{total_groups} groups • {total_files} files • {format_bytes(total_size)}")
         self.left_summary.setText(f"Showing {total_groups} of {len(self._all_groups)} groups")
         self.status_text.setText(f"{delete_count} files marked for deletion")
+        self.deletion_summary_label.setText(
+            f"Selected for delete: {delete_count}  ·  Protected/keeper: {keeper_count}"
+        )
         self.selection_stats.setText(f"{delete_count} files selected for deletion ({format_bytes(delete_size)})")
         if hasattr(self, "floating_delete") and self.floating_delete is not None:
             self.floating_delete.update_count(delete_count, delete_size)
@@ -1651,8 +1863,11 @@ class ReviewPage(BaseStation):
 
         total_files = sum(len(g["delete"]) for g in delete_groups)
 
-        # --- PART 4: Enhanced confirmation dialog ---
-        dlg = _ConfirmDeleteDialog(total_files, total_delete_size, blocked_count=skipped_groups, parent=self)
+        # --- PART 4: Enhanced confirmation dialog (default deletion from Settings) ---
+        default_mode = str((self._bus.get_scan_options() or {}).get("default_deletion_mode", "trash"))
+        dlg = _ConfirmDeleteDialog(
+            total_files, total_delete_size, blocked_count=skipped_groups, initial_mode=default_mode, parent=self
+        )
         if dlg.exec() != QDialog.Accepted or not dlg.accepted_result:
             return
 
@@ -1727,11 +1942,16 @@ class ReviewPage(BaseStation):
                 f"Could not write file:\n{e}",
             )
 
-    def refresh_after_deletion(self, deleted_paths) -> None:
+    def refresh_after_deletion(
+        self,
+        deleted_paths: Optional[List[Any]] = None,
+        failed_list: Optional[List[Tuple[str, str]]] = None,
+    ) -> None:
         """
-        Part 5: Remove successfully deleted files from all groups and refresh the UI.
+        Remove successfully deleted files from groups and refresh the UI.
         Called by MainWindow after PipelineCleanupWorker finishes.
-        Reconciliation: in-memory _all_groups and _filtered_groups are pruned; UI is refreshed.
+        failed_list: (path_str, error_str) from engine DeletionResult.failed.
+        Shows post-delete result banner and optional failure details.
         """
         try:
             from cerebro.services.logger import log_debug, log_error
@@ -1744,6 +1964,12 @@ class ReviewPage(BaseStation):
             except Exception:
                 pass
             return
+
+        deleted_count = len(paths_list)
+        failed_list = failed_list or []
+        self._last_deletion_deleted = deleted_count
+        self._last_deletion_failed = list(failed_list)
+        self._show_deletion_result_banner(deleted_count, failed_list)
 
         deleted_norm = set()
         try:
@@ -1797,6 +2023,53 @@ class ReviewPage(BaseStation):
         self._update_stats()
         self._refresh_delete_button()
 
+    def _show_deletion_result_banner(
+        self, deleted_count: int, failed_list: List[Tuple[str, str]]
+    ) -> None:
+        """Show post-delete result banner: Deleted N files · M failed; optional View failures button."""
+        if not self._deletion_result_banner:
+            return
+        self._deletion_result_banner.setVisible(True)
+        fail_count = len(failed_list)
+        if fail_count > 0:
+            self._deletion_result_label.setText(
+                f"Deleted {deleted_count} files  ·  {fail_count} failed"
+            )
+            self._view_failures_btn.setVisible(True)
+        else:
+            self._deletion_result_label.setText(f"Deleted {deleted_count} files")
+            self._view_failures_btn.setVisible(False)
+        c = ThemeHelper.colors()
+        bg = c.get("success", "rgba(34,197,94,0.15)") if fail_count == 0 else c.get("warning_bg", "rgba(234,179,8,0.12)")
+        self._deletion_result_banner.setStyleSheet(
+            f"QFrame#DeletionResultBanner {{ background: {bg}; border-radius: 8px; }}"
+        )
+
+    def _show_failure_details_dialog(self) -> None:
+        """Open a dialog listing failed deletions (path + error)."""
+        if not self._last_deletion_failed:
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Deletion Failures")
+        dlg.setMinimumSize(500, 300)
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(QLabel(f"{len(self._last_deletion_failed)} file(s) could not be deleted:"))
+        te = QTextEdit()
+        te.setReadOnly(True)
+        lines = []
+        for path, err in self._last_deletion_failed:
+            lines.append(f"{path}\n  → {err}\n")
+        te.setText("".join(lines))
+        layout.addWidget(te)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dlg.accept)
+        layout.addWidget(close_btn)
+        dlg.exec()
+
+    def _refresh_delete_button(self) -> None:
+        """Sync floating delete button and sticky bar with current selection (delegate to _update_stats)."""
+        self._update_stats()
+
     def apply_theme(self):
         c = ThemeHelper.colors()
         bg = c.get('bg', '#0f1115')
@@ -1829,6 +2102,11 @@ class ReviewPage(BaseStation):
                 background: {surface};
                 border-top: 1px solid {line};
             }}
+            QFrame#DeletionResultBanner {{
+                background: {theme_token('ok')};
+                border-radius: 8px;
+                border-bottom: 1px solid {line};
+            }}
             QLabel {{
                 color: {text};
             }}
@@ -1845,7 +2123,7 @@ class ReviewPage(BaseStation):
             }}
             QPushButton:disabled {{
                 background: {line};
-                color: #666;
+                color: {theme_token('muted')};
             }}
             QTableWidget {{
                 background: {panel};
@@ -1889,6 +2167,11 @@ class ReviewPage(BaseStation):
             QScrollArea {{
                 border: none;
                 background: transparent;
+            }}
+            QListView#GroupListView {{
+                background: transparent;
+                border: none;
+                outline: none;
             }}
         """)
 

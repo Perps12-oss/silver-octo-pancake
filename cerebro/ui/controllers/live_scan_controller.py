@@ -130,6 +130,7 @@ class LiveScanController(QObject):
         config["mode"] = "fast"
 
         self._scan_id = str(config.get("scan_id") or uuid.uuid4())
+        self._last_scan_config: Dict[str, Any] = dict(config)
         self._is_running = True
 
         # Initialize snapshot
@@ -348,6 +349,23 @@ class LiveScanController(QObject):
         self._logger.info("Scan cancelled")
         self._snapshot.cancel_scan()
         self._emit_snapshot_update()
+
+        # Save resume payload so "Resume last scan" on Start page can restore folder + options
+        try:
+            from cerebro.history.store import HistoryStore, ResumePayload
+            cfg = getattr(self, "_last_scan_config", None) or {}
+            store = HistoryStore()
+            payload = ResumePayload(
+                scan_id=str(self._scan_id or "cancelled"),
+                config=dict(cfg),
+                inventory_db_path="",
+                checkpoint_path="",
+                timestamp=time.time(),
+            )
+            store.save_resume_payload(payload)
+        except Exception:
+            pass
+
         self._finish_running()
 
         try:

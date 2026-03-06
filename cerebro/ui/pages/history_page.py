@@ -184,10 +184,12 @@ class HistoryPage(BaseStation):
             self._items = []
             for r in records:
                 when_str = datetime.fromtimestamp(r.timestamp).strftime("%Y-%m-%d %H:%M") if r.timestamp else ""
+                strategy = (r.policy or {}).get("scanner_tier") or (r.policy or {}).get("mode") or "—"
                 self._items.append({
                     "when": when_str,
                     "root": str(r.scan_id)[:32],
                     "groups": r.groups,
+                    "strategy": str(strategy),
                     "files": r.deleted,
                     "failed": getattr(r, "failed", 0),
                     "bytes_reclaimed": getattr(r, "bytes_reclaimed", 0),
@@ -229,7 +231,10 @@ class HistoryPage(BaseStation):
             failed = int(item.get("failed", 0) or 0)
             bytes_str = _fmt_bytes(int(item.get("bytes_reclaimed", 0) or 0))
             resumable = bool(item.get("terminated", False)) and not item.get("is_audit")
-            card = HistoryCard(ts, mode, deleted, failed, bytes_str, resumable=resumable)
+            groups = int(item.get("groups", 0) or 0)
+            strategy = str(item.get("strategy", "—"))
+            subtitle = f"{groups} groups · strategy: {strategy}" if (groups or strategy != "—") else None
+            card = HistoryCard(ts, mode, deleted, failed, bytes_str, resumable=resumable, subtitle=subtitle)
             payload = item.get("payload")
 
             def _open_bind(p):

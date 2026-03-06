@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from cerebro.ui.components.modern import PageHeader, PageScaffold
+from cerebro.ui.components.modern._tokens import token as theme_token
 from cerebro.ui.pages.base_station import BaseStation
 from cerebro.ui.state_bus import get_state_bus
 
@@ -71,6 +72,7 @@ APP_AUTHOR = "Cerebro Development Team"
 class HubTool(Enum):
     """Available hub tools"""
     PERFORMANCE = "performance"
+    ENGINE = "engine"
     LOGS = "logs"
     UPDATES = "updates"
     ABOUT = "about"
@@ -272,13 +274,13 @@ class PerformanceMonitor(QGroupBox):
         stats_grid.setSpacing(8)
         
         self._threads_label = QLabel("0")
-        self._threads_label.setStyleSheet("font-weight: 700; color: #5a8dff;")
+        self._threads_label.setStyleSheet(f"font-weight: 700; color: {theme_token('accent')};")
         
         self._cache_size_label = QLabel("0 MB")
-        self._cache_size_label.setStyleSheet("font-weight: 700; color: #10b981;")
+        self._cache_size_label.setStyleSheet(f"font-weight: 700; color: {theme_token('ok')};")
         
         self._cache_entries_label = QLabel("0")
-        self._cache_entries_label.setStyleSheet("font-weight: 700; color: #f59e0b;")
+        self._cache_entries_label.setStyleSheet(f"font-weight: 700; color: {theme_token('muted')};")
         
         stats_grid.addWidget(QLabel("Active Threads:"), 0, 0)
         stats_grid.addWidget(self._threads_label, 0, 1)
@@ -620,7 +622,7 @@ class SystemInformation(QGroupBox):
         
         # Section title
         title_label = QLabel(title)
-        title_label.setStyleSheet("font-size: 13px; font-weight: 700; color: #5a8dff;")
+        title_label.setStyleSheet(f"font-size: 13px; font-weight: 700; color: {theme_token('accent')};")
         layout.addWidget(title_label)
         
         # Items grid
@@ -730,12 +732,13 @@ class HubPage(BaseStation):
         # Define tools
         tools = [
             (HubTool.PERFORMANCE, "Performance", "Monitor system resources", "📈", True),
+            (HubTool.ENGINE, "Engine & Environment", "Cache, engine status, experimental", "⚙️", True),
             (HubTool.LOGS, "Logs", "View application logs", "🗂️", True),
             (HubTool.UPDATES, "Updates", "Check for updates", "⬆️", True),
             (HubTool.ABOUT, "About", "Application information", "ℹ️", True),
         ]
         
-        # Create cards
+        # Create cards (2 columns)
         for idx, (tool, title, desc, icon, enabled) in enumerate(tools):
             card = HubToolCard(tool, title, desc, icon, enabled)
             card.clicked.connect(self._show_tool)
@@ -767,6 +770,7 @@ class HubPage(BaseStation):
         # Create appropriate view
         views = {
             HubTool.PERFORMANCE: self._create_performance_view,
+            HubTool.ENGINE: self._create_engine_view,
             HubTool.LOGS: self._create_logs_view,
             HubTool.UPDATES: self._create_updates_view,
             HubTool.ABOUT: self._create_about_view,
@@ -782,7 +786,83 @@ class HubPage(BaseStation):
     def _create_performance_view(self) -> QWidget:
         """Create performance monitoring view"""
         return PerformanceMonitor()
-    
+
+    def _create_engine_view(self) -> QWidget:
+        """Create Engine & Environment view: cache, engine status, optional deps, experimental."""
+        container = QGroupBox("⚙️ Engine & Environment")
+        layout = QVBoxLayout(container)
+        layout.setSpacing(GRID_SPACING)
+        layout.setContentsMargins(CARD_PADDING, CARD_PADDING, CARD_PADDING, CARD_PADDING)
+        # Environment
+        sys_info = SystemInfo.detect()
+        env_lines = [
+            f"Python {sys_info.python_version}",
+            f"OS: {sys_info.os_name} ({sys_info.architecture})",
+            f"CPU cores: {sys_info.cpu_count}",
+        ]
+        env_label = QLabel("Environment:\n" + "\n".join(env_lines))
+        env_label.setStyleSheet("font-size: 12px;")
+        layout.addWidget(env_label)
+        # Cache status
+        try:
+            from cerebro.services.config import get_cache_dir
+            cache_dir = Path(get_cache_dir())
+            exists = cache_dir.exists()
+            size_str = "—"
+            if exists:
+                try:
+                    total = sum(f.stat().st_size for f in cache_dir.rglob("*") if f.is_file())
+                    size_str = f"{total / (1024*1024):.1f} MB"
+                except Exception:
+                    size_str = "?"
+            cache_label = QLabel(f"Cache directory: {cache_dir}\nStatus: {'OK' if exists else 'Missing'}\nSize: {size_str}")
+        except Exception as e:
+            cache_label = QLabel(f"Cache: Error — {e}")
+        cache_label.setStyleSheet("font-size: 12px;")
+        layout.addWidget(cache_label)
+        # Engine status
+        try:
+            from cerebro.engine.pipeline.scan_engine import ScanEngine
+            engine_label = QLabel("ScanEngine: Available (engine layer)")
+        except Exception as e:
+            engine_label = QLabel(f"ScanEngine: Unavailable — {e}")
+        engine_label.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {theme_token('ok')};")
+        layout.addWidget(engine_label)
+        # Optional dependencies (Ultra/Quantum)
+        deps = []
+        for name in ("xxhash", "numpy", "mmh3"):
+            try:
+                __import__(name)
+                deps.append(f"{name}: ✓")
+            except ImportError:
+                deps.append(f"{name}: —")
+        deps_label = QLabel("Optional deps (Ultra/Quantum): " + "  ".join(deps))
+        deps_label.setStyleSheet(f"font-size: 11px; color: {theme_token('muted')};")
+        layout.addWidget(deps_label)
+        # Experimental scanners (from bus)
+        try:
+            opts = self._bus.get_scan_options() or {}
+            exp = bool(opts.get("experimental_scanners", False))
+            exp_label = QLabel(f"Experimental scanners (Ultra/Quantum): {'Enabled' if exp else 'Disabled (enable in Settings → Advanced)'}")
+        except Exception:
+            exp_label = QLabel("Experimental scanners: —")
+        exp_label.setStyleSheet("font-size: 11px;")
+        layout.addWidget(exp_label)
+        layout.addStretch()
+        container.setStyleSheet(f"""
+            QGroupBox {{
+                background: rgba(20, 26, 38, 0.30);
+                border: 1px solid rgba(120,140,180,0.16);
+                border-radius: {CARD_BORDER_RADIUS}px;
+                font-weight: bold;
+                font-size: 14px;
+                padding-top: 16px;
+                margin-top: 8px;
+            }}
+            QGroupBox::title {{ subcontrol-origin: margin; left: 12px; padding: 0 8px; }}
+        """)
+        return container
+
     def _create_logs_view(self) -> QWidget:
         """Create logs viewer view"""
         return LogViewer()
