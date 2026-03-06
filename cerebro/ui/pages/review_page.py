@@ -924,12 +924,14 @@ class DualPaneComparison(QFrame):
 
     def set_thumbnail_loader(self, loader: Optional[Any]) -> None:
         """Use async loader for images so UI stays responsive (lazy thumbnails)."""
+        old_loader = self._thumbnail_loader
         self._thumbnail_loader = loader
-        if loader and hasattr(loader, "thumbnail_ready"):
+        if old_loader and old_loader is not loader and hasattr(old_loader, "thumbnail_ready"):
             try:
-                loader.thumbnail_ready.disconnect(self._on_thumbnail_ready)
+                old_loader.thumbnail_ready.disconnect(self._on_thumbnail_ready)
             except (TypeError, RuntimeError):
                 pass
+        if loader and hasattr(loader, "thumbnail_ready"):
             loader.thumbnail_ready.connect(self._on_thumbnail_ready)
 
     @Slot(str, QPixmap)
@@ -1358,16 +1360,18 @@ class ReviewPage(BaseStation):
         for text, callback in smart_buttons:
             btn = QPushButton(text)
             btn.clicked.connect(callback)
-            btn.setStyleSheet("""
-                QPushButton {
-                    background: {theme_token('panel')};
-                    border: 1px solid {theme_token('accent')};
+            panel_bg = theme_token("panel")
+            accent = theme_token("accent")
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: {panel_bg};
+                    border: 1px solid {accent};
                     border-radius: 8px;
                     padding: 8px;
                     text-align: left;
                 }}
                 QPushButton:hover {{
-                    border-color: {theme_token('accent')};
+                    border-color: {accent};
                 }}
             """)
             smart_layout.addWidget(btn)

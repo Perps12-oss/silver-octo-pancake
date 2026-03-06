@@ -711,13 +711,36 @@ class ScanPage(BaseStation):
     @Slot(dict)
     def _on_resume_requested(self, payload: dict[str, Any]) -> None:
         """
-        Handle resume signal from history page.
-        Payload may contain 'root' or 'scan_root' – safely set folder picker.
+        Handle resume from Start or History. Restore folder from payload["config"]
+        and apply config to bus so scanner tier and options are restored.
+        If the resumed root path no longer exists, show a message and do not restore.
         """
         try:
-            root = payload.get("root") or payload.get("scan_root") or ""
-            if root and Path(root).is_dir():
-                self._folder_picker.set_path(str(root))
+            config = payload.get("config") or {}
+            root = (
+                config.get("root") or config.get("scan_root")
+                or payload.get("root") or payload.get("scan_root")
+                or ""
+            )
+            root = str(root).strip()
+            if root:
+                if not Path(root).is_dir():
+                    self._bus.publish_notification(
+                        "Resume folder not found",
+                        f"The resumed folder no longer exists:\n{root}\nPlease choose another folder and start a new scan.",
+                        level="warning",
+                        duration=6000,
+                    )
+                    return
+                self._folder_picker.set_path(root)
+            # Restore scan options (scanner_tier, media_type, engine, etc.) into bus (omit path-only keys)
+            if config:
+                opts = dict(self._bus.get_scan_options() or {})
+                skip_keys = {"root", "scan_root"}
+                opts.update({k: v for k, v in config.items() if k not in skip_keys and v is not None})
+                self._bus.set_scan_options(opts)
+            # Sync scan page UI from bus (tier combo, experimental, etc.)
+            self.on_enter()
         except Exception:
             # Malformed payload – ignore and let user pick folder manually
             pass

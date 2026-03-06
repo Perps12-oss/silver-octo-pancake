@@ -22,6 +22,14 @@ class ScanOptions:
     fast_mode: bool = True
     media_type: str = "all"
     engine: str = "simple"
+    # Persisted with config (advanced/cleanup)
+    default_deletion_mode: str = "trash"
+    default_scanner_tier: str = "turbo"
+    experimental_scanners: bool = False
+    excluded_folders: List[str] = field(default_factory=list)
+    cache_directory: str = ""
+    # Current scanner tier (Scan page selection; restored on resume)
+    scanner_tier: str = "turbo"
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -30,6 +38,10 @@ class ScanOptions:
     def from_dict(cls, d: Optional[Dict[str, Any]]) -> "ScanOptions":
         if not d:
             return cls()
+        excluded = d.get("excluded_folders")
+        if not isinstance(excluded, (list, tuple)):
+            excluded = []
+        excluded = list(excluded) if excluded else []
         return cls(
             mode=str(d.get("mode", "exact")),
             min_size_bytes=int(d.get("min_size_bytes", 102400)),
@@ -43,6 +55,12 @@ class ScanOptions:
             fast_mode=bool(d.get("fast_mode", True)),
             media_type=str(d.get("media_type", "all")),
             engine=str(d.get("engine", "simple")),
+            default_deletion_mode=str(d.get("default_deletion_mode", "trash")),
+            default_scanner_tier=str(d.get("default_scanner_tier", "turbo")),
+            experimental_scanners=bool(d.get("experimental_scanners", False)),
+            excluded_folders=excluded,
+            cache_directory=str(d.get("cache_directory", "")),
+            scanner_tier=str(d.get("scanner_tier", "turbo")),
         )
 
 

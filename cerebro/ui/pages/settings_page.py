@@ -811,6 +811,13 @@ class SettingsPage(BaseStation):
                     dark_mode=getattr(ui_cfg, 'dark_mode', True)
                 )
             
+            # Hydrate state bus from persisted scan_options_ui so advanced/cleanup survive restart
+            persisted = getattr(config, "scan_options_ui", None)
+            if isinstance(persisted, dict) and persisted:
+                opts = dict(self._bus.get_scan_options() or {})
+                opts.update(persisted)
+                self._bus.set_scan_options(opts)
+
             # Update UI
             self._scan_group.load(self._config.scan)
             self._perf_group.load(PerformanceSettings())
@@ -825,7 +832,7 @@ class SettingsPage(BaseStation):
                 cache_directory=str(opts.get("cache_directory", "")),
                 excluded_folders=excluded_str,
             )
-            
+
         except Exception as e:
             # Don't crash on load failure, use defaults
             self._scan_group.load(ScanSettings())
@@ -854,28 +861,37 @@ class SettingsPage(BaseStation):
             if excluded:
                 opts["excluded_folders"] = excluded
             self._bus.set_scan_options(opts)
-            
+
             # Import config module
             from cerebro.services.config import load_config, save_config  # type: ignore
-            
+
             config = load_config()
-            
+
             # Update config object
             if hasattr(config, 'scan'):
                 scan_cfg = config.scan
                 for key, value in vars(self._config.scan).items():
                     setattr(scan_cfg, key, value)
-            
+
             if hasattr(config, 'performance'):
                 perf_cfg = config.performance
                 for key, value in vars(self._config.performance).items():
                     setattr(perf_cfg, key, value)
-            
+
             if hasattr(config, 'ui'):
                 ui_cfg = config.ui
                 for key, value in vars(self._config.ui).items():
                     setattr(ui_cfg, key, value)
-            
+
+            # Persist advanced/cleanup to config so they survive restart
+            config.scan_options_ui = {
+                "default_deletion_mode": opts.get("default_deletion_mode", "trash"),
+                "default_scanner_tier": opts.get("default_scanner_tier", "turbo"),
+                "experimental_scanners": opts.get("experimental_scanners", False),
+                "excluded_folders": list(opts.get("excluded_folders") or []),
+                "cache_directory": str(opts.get("cache_directory", "")),
+            }
+
             # Save to disk
             save_config(config)
             

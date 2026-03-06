@@ -254,7 +254,10 @@ class AppConfig:
     auto_save: bool = True
     minimize_to_tray: bool = True
     start_minimized: bool = False
-    
+
+    # Scan options UI (advanced/cleanup) – persisted so they survive restart
+    scan_options_ui: Dict[str, Any] = field(default_factory=dict)
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert configuration to dictionary."""
         data = asdict(self)
@@ -289,10 +292,14 @@ class AppConfig:
         # Handle binary data
         geometry_hex = data.pop('window_geometry', None)
         state_hex = data.pop('window_state', None)
-        
+        scan_options_ui_data = data.pop('scan_options_ui', {})
+
         # Create instance
         instance = cls(**data)
-        
+
+        # Scan options UI (advanced/cleanup)
+        instance.scan_options_ui = dict(scan_options_ui_data) if isinstance(scan_options_ui_data, dict) else {}
+
         # Set nested dataclasses
         instance.ui = UISettings.from_dict(ui_data)
         instance.scan = ScanSettings.from_dict(scan_data)
@@ -349,16 +356,20 @@ class AppConfig:
         if self.performance.memory_limit_mb < 100:
             errors.append("memory_limit_mb must be at least 100")
         # Validate theme without importing theme_engine (avoids recursion: theme_engine calls load_config).
-        # Use base set + built-in themes + theme JSON files; discovery runs once at startup.
+        # Use base set + built-in themes from theme_engine.py + theme JSON files; discovery runs once at startup.
         global _valid_themes_cache, _theme_fallback_logged
         if _valid_themes_cache is None:
-            # Include all built-in themes defined in theme_engine.py
+            # All built-in theme keys from theme_engine._get_builtin_themes() (must stay in sync)
             valid_themes = {
                 "dark", "light", "custom", "system",
-                # Built-in themes from _get_builtin_themes()
                 "cyberpunk", "neon_nights", "forest_canopy", "ocean_depths",
                 "sunset_desert", "arctic_frost", "violet_vault", "ember_glow",
-                "lavender_dream", "mint_fresh", "coral_reef", "ice_cream"
+                "lavender_dream", "mint_fresh", "coral_reef", "ice_cream",
+                "neon_void", "laser_lilac", "blood_moon", "emerald_ritual",
+                "forest_law", "mint_terminal", "coal_cinnamon", "amber_archive",
+                "hacker_sunrise", "desert_ui", "arctic_byte", "deep_ocean",
+                "cobalt_suit", "royal_ink", "graphite_mint", "sakura_overdrive",
+                "noir_peach", "lime_lab", "paperwork",
             }
             try:
                 themes_dir = Path(__file__).resolve().parents[1] / "ui" / "themes"
