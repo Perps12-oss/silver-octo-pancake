@@ -130,6 +130,7 @@ class LiveScanController(QObject):
         config["mode"] = "fast"
 
         self._scan_id = str(config.get("scan_id") or uuid.uuid4())
+        config["scan_id"] = self._scan_id
         self._last_scan_config: Dict[str, Any] = dict(config)
         self._is_running = True
 
@@ -189,6 +190,7 @@ class LiveScanController(QObject):
         w.group_discovered.connect(self._on_groups_delta)
         w.warning_raised.connect(self._on_warning)
         w.progress_updated.connect(self._on_progress)
+        w.error_occurred.connect(self._on_error)
 
         w.finished.connect(self._on_completed)
         w.cancelled.connect(self._on_cancelled)
@@ -253,6 +255,11 @@ class LiveScanController(QObject):
         self._pending_snapshot_updates["warnings"] = current_warnings
 
         self.warnings_logged.emit(current_warnings)
+
+    @Slot(str)
+    def _on_error(self, _msg: str) -> None:
+        """Phase 1: Increment errors_count when worker emits error_occurred."""
+        self._pending_snapshot_updates["errors_count"] = self._snapshot.errors_count + 1
 
     @Slot(object)
     def _on_progress(self, progress: ScanProgress) -> None:
@@ -326,15 +333,22 @@ class LiveScanController(QObject):
             pass
 
         # Apply only completion payload so stale progress_percent doesn't overwrite 100%
+        stats = result.get("stats") or {}
+        files_skipped = int(stats.get("files_skipped", 0) or 0)
         self._pending_snapshot_updates = {
             "duplicates_found": int(result.get("duplicate_count", 0) or 0),
-            "groups_found": int(result.get("group_count", result.get("groups_found", 0)) or 0),
+            "groups_found": int(result.get("groups_count", result.get("group_count", result.get("groups_found", 0))) or 0),
+            "files_skipped": files_skipped,
         }
         self._emit_snapshot_update()
         self._finish_running()
 
         payload = dict(result or {})
         payload.setdefault("scan_id", self._scan_id)
+
+        # When store was used, emit light payload (no groups) so Review loads from store
+        if payload.get("result_store_path"):
+            payload = {k: v for k, v in payload.items() if k != "groups"}
 
         # Publish to bus ONCE (controller is the sole publisher)
         try:

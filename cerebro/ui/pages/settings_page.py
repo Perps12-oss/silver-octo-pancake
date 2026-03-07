@@ -439,10 +439,10 @@ class CleanupSettingsGroup(QGroupBox):
 
 
 class AdvancedSettingsGroup(QGroupBox):
-    """Default scanner tier, experimental features, cache directory (structure-aligned)."""
+    """Phase 8: Advanced (power user) + Expert (engine knobs) reorganization."""
 
     def __init__(self, parent: Optional[QWidget] = None):
-        super().__init__("🔧 Advanced / Structure", parent)
+        super().__init__("🔧 Advanced & Expert", parent)
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -450,25 +450,55 @@ class AdvancedSettingsGroup(QGroupBox):
         layout.setSpacing(GRID_SPACING)
         layout.setContentsMargins(CARD_PADDING, CARD_PADDING, CARD_PADDING, CARD_PADDING)
         row = 0
+
+        # --- Advanced (power user): always visible ---
+        adv_label = QLabel("Power user options")
+        adv_label.setStyleSheet("font-weight: bold; margin-bottom: 4px;")
+        layout.addWidget(adv_label, row, 0, 1, 2)
+        row += 1
+
         layout.addWidget(QLabel("Default scanner tier:"), row, 0)
         self._default_scanner_tier = QComboBox()
         self._default_scanner_tier.addItems(["Simple", "Advanced", "Turbo"])
-        self._default_scanner_tier.setToolTip("Default scan strategy on Scan page.")
+        self._default_scanner_tier.setToolTip("Default scan strategy when using Advanced mode on Scan page.")
         layout.addWidget(self._default_scanner_tier, row, 1)
         row += 1
+
         self._experimental_toggle = QCheckBox("Enable experimental scanners (Ultra / Quantum)")
-        self._experimental_toggle.setToolTip("Show and allow Ultra/Quantum tiers on Scan page.")
+        self._experimental_toggle.setToolTip("Show and allow Ultra/Quantum tiers on Scan page when in Advanced mode.")
         layout.addWidget(self._experimental_toggle, row, 0, 1, 2)
         row += 1
-        layout.addWidget(QLabel("Cache directory:"), row, 0)
+
+        # --- Expert opt-in: reveals engine/structure knobs ---
+        self._expert_toggle = QCheckBox("Show Expert options (cache, exclusions, engine knobs)")
+        self._expert_toggle.setToolTip(
+            "Reveal technical controls: cache directory, excluded folders. "
+            "For users who need to customize engine behavior."
+        )
+        self._expert_toggle.toggled.connect(self._on_expert_toggled)
+        layout.addWidget(self._expert_toggle, row, 0, 1, 2)
+        row += 1
+
+        # --- Expert section (hidden until opt-in) ---
+        self._expert_widget = QWidget()
+        expert_layout = QGridLayout(self._expert_widget)
+        expert_layout.setContentsMargins(0, 8, 0, 0)
+        expert_layout.setSpacing(GRID_SPACING)
+        er = 0
+        expert_layout.addWidget(QLabel("Cache directory:"), er, 0)
         self._cache_dir = QLineEdit()
         self._cache_dir.setPlaceholderText("Leave empty for default (~/.cerebro/cache)")
-        layout.addWidget(self._cache_dir, row, 1)
-        row += 1
-        layout.addWidget(QLabel("Excluded folders:"), row, 0)
+        expert_layout.addWidget(self._cache_dir, er, 1)
+        er += 1
+        expert_layout.addWidget(QLabel("Excluded folders:"), er, 0)
         self._excluded_folders = QLineEdit()
         self._excluded_folders.setPlaceholderText("e.g. .git, node_modules (comma-separated)")
-        layout.addWidget(self._excluded_folders, row, 1)
+        expert_layout.addWidget(self._excluded_folders, er, 1)
+        layout.addWidget(self._expert_widget, row, 0, 1, 2)
+        self._expert_widget.setVisible(False)
+
+    def _on_expert_toggled(self, checked: bool) -> None:
+        self._expert_widget.setVisible(checked)
 
     def load(
         self,
@@ -476,6 +506,7 @@ class AdvancedSettingsGroup(QGroupBox):
         experimental_scanners: bool = False,
         cache_directory: str = "",
         excluded_folders: str = "",
+        expert_options_enabled: bool = False,
     ) -> None:
         tier = (default_scanner_tier or "turbo").lower()
         idx = {"simple": 0, "advanced": 1, "turbo": 2}.get(tier, 2)
@@ -483,6 +514,8 @@ class AdvancedSettingsGroup(QGroupBox):
         self._experimental_toggle.setChecked(bool(experimental_scanners))
         self._cache_dir.setText(cache_directory or "")
         self._excluded_folders.setText(excluded_folders or "")
+        self._expert_toggle.setChecked(bool(expert_options_enabled))
+        self._expert_widget.setVisible(bool(expert_options_enabled))
 
     def save(self) -> dict:
         return {
@@ -490,6 +523,7 @@ class AdvancedSettingsGroup(QGroupBox):
             "experimental_scanners": self._experimental_toggle.isChecked(),
             "cache_directory": self._cache_dir.text().strip(),
             "excluded_folders": self._excluded_folders.text().strip(),
+            "expert_options_enabled": self._expert_toggle.isChecked(),
         }
 
 
@@ -625,7 +659,7 @@ class SettingsPage(BaseStation):
             SidebarNavItem("scanning", "🔍", "Scanning", 0),
             SidebarNavItem("cleanup", "🗑️", "Cleanup", 0),
             SidebarNavItem("performance", "⚡", "Performance", 0),
-            SidebarNavItem("advanced", "🔧", "Advanced", 0),
+            SidebarNavItem("advanced", "🔧", "Advanced & Expert", 0),
         ]
         self._sidebar = SidebarNav(nav_items)
         self._sidebar.item_clicked.connect(self._on_nav_clicked)
@@ -831,6 +865,7 @@ class SettingsPage(BaseStation):
                 experimental_scanners=bool(opts.get("experimental_scanners", False)),
                 cache_directory=str(opts.get("cache_directory", "")),
                 excluded_folders=excluded_str,
+                expert_options_enabled=bool(opts.get("expert_options_enabled", False)),
             )
 
         except Exception as e:
@@ -856,7 +891,9 @@ class SettingsPage(BaseStation):
             opts["default_deletion_mode"] = default_deletion
             opts["default_scanner_tier"] = advanced.get("default_scanner_tier", "turbo")
             opts["experimental_scanners"] = advanced.get("experimental_scanners", False)
+            opts["expert_options_enabled"] = advanced.get("expert_options_enabled", False)
             opts["cache_directory"] = advanced.get("cache_directory", "")
+            opts["expert_options_enabled"] = advanced.get("expert_options_enabled", False)
             excluded = parse_excluded_dirs(advanced.get("excluded_folders", ""))
             if excluded:
                 opts["excluded_folders"] = excluded
@@ -883,14 +920,18 @@ class SettingsPage(BaseStation):
                 for key, value in vars(self._config.ui).items():
                     setattr(ui_cfg, key, value)
 
-            # Persist advanced/cleanup to config so they survive restart
-            config.scan_options_ui = {
+            # Persist advanced/cleanup + scan_ui_mode to config so they survive restart
+            so = dict(config.scan_options_ui or {})
+            so.update({
                 "default_deletion_mode": opts.get("default_deletion_mode", "trash"),
                 "default_scanner_tier": opts.get("default_scanner_tier", "turbo"),
                 "experimental_scanners": opts.get("experimental_scanners", False),
                 "excluded_folders": list(opts.get("excluded_folders") or []),
                 "cache_directory": str(opts.get("cache_directory", "")),
-            }
+                "scan_ui_mode": opts.get("scan_ui_mode") or so.get("scan_ui_mode", "simple"),
+                "expert_options_enabled": opts.get("expert_options_enabled", False),
+            })
+            config.scan_options_ui = so
 
             # Save to disk
             save_config(config)

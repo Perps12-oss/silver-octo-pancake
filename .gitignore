@@ -6,6 +6,8 @@ __pycache__/
 # logs / runtime
 logs/
 cerebro/logs/
+*.log
+crash_report.txt
 
 # venv
 .venv/

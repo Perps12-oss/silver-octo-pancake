@@ -168,6 +168,18 @@ class MainWindow(QMainWindow):
         self._bus = get_state_bus()
         self._theme = get_theme_manager()
 
+        # Phase 16: Hydrate bus from config before building pages (scan_options_ui, etc.)
+        try:
+            from cerebro.services.config import load_config
+            config = load_config()
+            persisted = getattr(config, "scan_options_ui", None)
+            if isinstance(persisted, dict) and persisted:
+                opts = dict(self._bus.get_scan_options() or {})
+                opts.update(persisted)
+                self._bus.set_scan_options(opts)
+        except Exception:
+            pass
+
         self._toast = ToastOverlay(self)
         self._toast.bind_action_handler(self._on_toast_action)
 
@@ -216,6 +228,12 @@ class MainWindow(QMainWindow):
                     )
                 # Always clamp to current screen so window never exceeds visible area
                 ensure_window_on_screen(self)
+                # Hydrate state bus from persisted scan_options_ui (Phase 5: scan_ui_mode, etc.)
+                persisted = getattr(config, "scan_options_ui", None)
+                if isinstance(persisted, dict) and persisted:
+                    opts = dict(self._bus.get_scan_options() or {})
+                    opts.update(persisted)
+                    self._bus.set_scan_options(opts)
             except Exception:
                 pass
 
@@ -449,12 +467,17 @@ class MainWindow(QMainWindow):
         except Exception as e:
             log_error(f"[UI] History ingest failed: {e}")
 
-        # Store recent scan summary for Start page Mission Control
+        # Store recent scan summary for Start page Mission Control (Phase 15: include files)
         try:
             import time as _time
+            groups = int(result.get("groups_count", 0) or 0) or len(result.get("groups") or [])
+            files = result.get("files_count") or result.get("file_count") or sum(
+                len(g.get("paths", [])) for g in (result.get("groups") or [])
+            )
             self._bus.set_last_scan_summary({
                 "scan_id": str(result.get("scan_id") or ""),
-                "groups": len(result.get("groups") or []),
+                "groups": groups,
+                "files": int(files) if files is not None else None,
                 "root": str(result.get("root") or result.get("scan_root") or ""),
                 "timestamp": _time.time(),
             })

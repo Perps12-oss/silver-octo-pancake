@@ -26,6 +26,8 @@ from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QComboBox,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -49,7 +51,7 @@ from cerebro.ui.controllers.live_scan_controller import (
     ControllerConfig,
     LiveScanController,
 )
-from cerebro.ui.models.live_scan_snapshot import LiveScanSnapshot
+from cerebro.ui.models.live_scan_snapshot import LiveScanSnapshot, ScanPhase
 from cerebro.ui.pages.base_station import BaseStation
 from cerebro.ui.state_bus import get_state_bus
 from cerebro.ui.widgets.live_scan_panel import LiveScanPanel
@@ -83,6 +85,13 @@ class StatusText:
     IDLE = "Idle"
     SCANNING = "Scanning…"
     CANCELLING = "Cancelling…"
+    COMPLETE = "Complete"
+    CANCELLED = "Cancelled"
+    FAILED = "Failed"
+
+
+# Phase 2: Scan stages for hierarchy display
+SCAN_STAGES = ["Discovering", "Hashing", "Grouping", "Finalizing"]
 
 
 class ControllerStatus:
@@ -232,7 +241,7 @@ class ScanPage(BaseStation):
         """Create and attach the page header."""
         header = PageHeader(
             "Scan",
-            "Choose a folder and run. Presets and advanced options are in Settings → Scanning."
+            "Choose a folder and scan. Switch to Advanced for scanner tier, media type, and more."
         )
         self._scaffold.set_header(header)
 
@@ -250,8 +259,12 @@ class ScanPage(BaseStation):
 
         self._build_folder_picker(content_layout)
         self._build_scan_filters(content_layout)
-        self._build_prominent_scan_button(content_layout)
+        # Phase 5: Single Start Scan CTA in sticky bar only (no duplicate prominent button)
         self._build_stat_row(content_layout)
+        # Phase 3: Scan summary card (visible when complete)
+        self._summary_card = self._build_scan_summary_card()
+        content_layout.addWidget(self._summary_card)
+        self._summary_card.setVisible(False)
         self._build_main_panels(content_layout)
 
         self._scaffold.set_content(content)
@@ -318,14 +331,20 @@ class ScanPage(BaseStation):
         toggle_row.addStretch()
         parent_layout.addLayout(toggle_row)
 
-        # --- Scan Strategy: core tiers (registry) + optional experimental ---
+        # --- Advanced options container (hidden in Simple mode; Phase 5 & 6) ---
+        # Contains: Scan Strategy (tier + experimental), media type, engine
+        self._advanced_options = QWidget()
+        adv_layout = QVBoxLayout(self._advanced_options)
+        adv_layout.setContentsMargins(0, 0, 0, 0)
+        adv_layout.setSpacing(LayoutMetrics.PAGE_SPACING)
+
+        # Scan Strategy: core tiers + optional experimental (Phase 6: moved to Advanced)
         strategy_label = QLabel("Scan Strategy")
         strategy_label.setStyleSheet(f"color: {text}; font-weight: bold; margin-top: 8px;")
-        parent_layout.addWidget(strategy_label)
+        adv_layout.addWidget(strategy_label)
 
         scanner_row = QHBoxLayout()
         scanner_row.setSpacing(LayoutMetrics.PAGE_SPACING)
-        # Core modes: simple (ScanEngine), advanced, turbo — from scanner registry
         self._scanner_tier_combo = QComboBox()
         self._scanner_tier_combo.addItems([
             "Simple (ScanEngine)",
@@ -341,9 +360,8 @@ class ScanPage(BaseStation):
         self._scanner_tier_combo.setMinimumWidth(LayoutMetrics.COMBO_MIN_WIDTH)
         scanner_row.addWidget(QLabel("Core:"))
         scanner_row.addWidget(self._scanner_tier_combo, 1)
-        parent_layout.addLayout(scanner_row)
+        adv_layout.addLayout(scanner_row)
 
-        # Experimental modes (expandable); visible when enabled in Settings
         from PySide6.QtWidgets import QGroupBox
         self._experimental_group = QGroupBox("Experimental")
         self._experimental_group.setCheckable(True)
@@ -360,22 +378,16 @@ class ScanPage(BaseStation):
         )
         exp_row.addWidget(self._experimental_tier_combo, 1)
         exp_layout.addLayout(exp_row)
-        self._experimental_group.setVisible(True)  # show panel; use checked state to decide if selected
+        self._experimental_group.setVisible(True)
         self._experimental_group.toggled.connect(lambda _: self._persist_scanner_tier())
-        # Gate: enable only when Settings → Advanced has "experimental scanners" checked
         try:
             opts = self._bus.get_scan_options() or {}
             self._experimental_group.setEnabled(bool(opts.get("experimental_scanners", False)))
         except Exception:
             self._experimental_group.setEnabled(False)
-        parent_layout.addWidget(self._experimental_group)
+        adv_layout.addWidget(self._experimental_group)
 
-        # --- Advanced options container (hidden in Simple mode) ---
-        self._advanced_options = QWidget()
-        adv_layout = QVBoxLayout(self._advanced_options)
-        adv_layout.setContentsMargins(0, 0, 0, 0)
-        adv_layout.setSpacing(LayoutMetrics.PAGE_SPACING)
-
+        # Media type + Engine (Phase 6: Advanced-only)
         filter_row = QHBoxLayout()
         filter_row.setSpacing(LayoutMetrics.PAGE_SPACING)
         filter_row.addWidget(QLabel("Scan type:"))
@@ -400,49 +412,23 @@ class ScanPage(BaseStation):
         parent_layout.addWidget(self._advanced_options)
 
     def _on_ui_mode_changed(self, mode: str) -> None:
-        """Toggle visibility of advanced options and persist the choice."""
+        """Toggle visibility of advanced options and persist the choice (Phase 5 & 6)."""
         is_adv = (mode == "advanced")
         if hasattr(self, "_advanced_options"):
             self._advanced_options.setVisible(is_adv)
-        # Persist to bus so choice survives page re-entry
         try:
             opts = self._bus.get_scan_options() or {}
             opts["scan_ui_mode"] = mode
             self._bus.set_scan_options(opts)
+            # Persist to config so choice survives app restart
+            from cerebro.services.config import load_config, save_config
+            config = load_config()
+            so = dict(getattr(config, "scan_options_ui", None) or {})
+            so["scan_ui_mode"] = mode
+            config.scan_options_ui = so
+            save_config(config)
         except Exception:
             pass
-
-    def _build_prominent_scan_button(self, parent_layout: QVBoxLayout) -> None:
-        """Add a large, prominent Start Scan CTA. Configure presets in Settings > Scanning."""
-        accent = theme_token("accent")
-        self._start_scan_btn = QPushButton("  ▶  Start Scan")
-        self._start_scan_btn.setObjectName("ProminentScanButton")
-        self._start_scan_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._start_scan_btn.setMinimumHeight(64)
-        self._start_scan_btn.setStyleSheet(f"""
-            QPushButton#ProminentScanButton {{
-                background: {accent};
-                color: white;
-                border: none;
-                border-radius: 16px;
-                font-size: 20px;
-                font-weight: bold;
-                padding: 16px 32px;
-            }}
-            QPushButton#ProminentScanButton:hover {{
-                background: {accent};
-                opacity: 0.95;
-            }}
-            QPushButton#ProminentScanButton:pressed {{
-                padding: 18px 30px 14px 34px;
-            }}
-            QPushButton#ProminentScanButton:disabled {{
-                background: {theme_token('line')};
-                color: {theme_token('muted')};
-            }}
-        """)
-        self._start_scan_btn.clicked.connect(self._start_scan)
-        parent_layout.addWidget(self._start_scan_btn)
 
     def _build_stat_row(self, parent_layout: QVBoxLayout) -> None:
         """Create the row of four StatCards."""
@@ -460,6 +446,62 @@ class ScanPage(BaseStation):
         stat_row.addWidget(self._stat_eta)
 
         parent_layout.addLayout(stat_row)
+
+    def _build_scan_summary_card(self) -> QFrame:
+        """Phase 3: Prominent scan summary card, visible when scan completes."""
+        from PySide6.QtWidgets import QFrame, QGridLayout
+        card = QFrame()
+        card.setObjectName("ScanSummaryCard")
+        layout = QGridLayout(card)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(8)
+        text = theme_token("text")
+        muted = theme_token("muted")
+        accent = theme_token("accent")
+        self._summary_title = QLabel("Scan complete")
+        self._summary_title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {accent};")
+        layout.addWidget(self._summary_title, 0, 0, 1, 4)
+        self._summary_files = QLabel("Files: —")
+        self._summary_groups = QLabel("Groups: —")
+        self._summary_skipped = QLabel("Skipped: —")
+        self._summary_errors = QLabel("Errors: —")
+        self._summary_duration = QLabel("Duration: —")
+        for lbl in (self._summary_files, self._summary_groups, self._summary_skipped, self._summary_errors, self._summary_duration):
+            lbl.setStyleSheet(f"font-size: 12px; color: {text};")
+        layout.addWidget(self._summary_files, 1, 0)
+        layout.addWidget(self._summary_groups, 1, 1)
+        layout.addWidget(self._summary_skipped, 1, 2)
+        layout.addWidget(self._summary_errors, 1, 3)
+        layout.addWidget(self._summary_duration, 2, 0, 1, 2)
+        card.setStyleSheet(f"""
+            QFrame#ScanSummaryCard {{
+                background: {theme_token('panel')};
+                border: 1px solid {theme_token('line')};
+                border-radius: 10px;
+            }}
+        """)
+        return card
+
+    def _update_scan_summary_card(self, snapshot: LiveScanSnapshot) -> None:
+        """Phase 3: Update and show/hide scan summary card based on snapshot."""
+        if not hasattr(self, "_summary_card") or self._summary_card is None:
+            return
+        if snapshot.phase == ScanPhase.COMPLETED:
+            self._summary_card.setVisible(True)
+            self._summary_title.setText("Scan complete")
+            self._summary_files.setText(f"Files: {snapshot.files_processed:,}")
+            self._summary_groups.setText(f"Groups: {snapshot.groups_found:,}")
+            self._summary_skipped.setText(f"Skipped: {snapshot.files_skipped:,}")
+            err = getattr(snapshot, "errors_count", 0) or 0
+            self._summary_errors.setText(f"Errors: {err:,}")
+            elapsed = 0.0
+            start = getattr(snapshot, "_start_time", None)
+            last = getattr(snapshot, "_last_update_time", None)
+            if start and last and last >= start:
+                elapsed = last - start
+            self._summary_duration.setText(f"Duration: {elapsed:.1f}s" if elapsed > 0 else "Duration: —")
+        else:
+            self._summary_card.setVisible(False)
 
     def _build_main_panels(self, parent_layout: QVBoxLayout) -> None:
         """Add the live scan panel (full width). Scan presets and advanced options are in Settings > Scanning."""
@@ -514,6 +556,11 @@ class ScanPage(BaseStation):
             self._scanner_tier_combo.currentIndexChanged.connect(self._on_scanner_tier_changed)
         if hasattr(self, "_experimental_tier_combo"):
             self._experimental_tier_combo.currentIndexChanged.connect(self._on_experimental_tier_changed)
+        # Phase 4: Media type and engine persistence
+        if hasattr(self, "_media_type_combo"):
+            self._media_type_combo.currentIndexChanged.connect(self._on_media_type_changed)
+        if hasattr(self, "_engine_combo"):
+            self._engine_combo.currentIndexChanged.connect(self._on_engine_changed)
         # Advanced options toggle (in case toggled before signal was connected)
         if hasattr(self, "_advanced_options"):
             opts = self._bus.get_scan_options() or {}
@@ -536,6 +583,14 @@ class ScanPage(BaseStation):
         # Update live panel
         self._live.update_from_snapshot(snapshot)
 
+        # Phase 3: Show/update scan summary card when complete
+        if hasattr(self, "_summary_card") and self._summary_card is not None:
+            if snapshot.phase == ScanPhase.COMPLETED:
+                self._summary_card.setVisible(True)
+                self._update_scan_summary_card(snapshot)
+            else:
+                self._summary_card.setVisible(False)
+
         # Update stat cards and UI state
         self._update_ui_from_snapshot(snapshot)
 
@@ -543,27 +598,47 @@ class ScanPage(BaseStation):
         self._publish_to_bus(snapshot)
 
     def _update_ui_from_snapshot(self, snapshot: LiveScanSnapshot) -> None:
-        """Refresh stat cards, sticky bar, and internal state."""
+        """Refresh stat cards, sticky bar, and internal state. Phase 2: state/stage clarity."""
         # Stat cards
         self._stat_files.set_value(snapshot.format_files_processed())
         self._stat_groups.set_value(str(snapshot.groups_found))
         self._stat_speed.set_value(snapshot.throughput.format_files_per_second())
         self._stat_eta.set_value(snapshot.throughput.format_eta())
 
-        # Determine UI state
+        # Phase 2: Determine status and stage for sticky bar
+        phase_name = getattr(snapshot.phase, "display_name", "") or str(getattr(snapshot.phase, "name", ""))
         if snapshot.is_active:
             if snapshot.is_cancelling:
                 status = StatusText.CANCELLING
+                subtext = ""
                 start_enabled = False
                 cancel_enabled = False
             else:
                 status = StatusText.SCANNING
+                subtext = phase_name or "Processing…"
                 start_enabled = False
                 cancel_enabled = True
         else:
-            status = StatusText.IDLE
-            start_enabled = True
-            cancel_enabled = False
+            if snapshot.phase == ScanPhase.COMPLETED:
+                status = StatusText.COMPLETE
+                subtext = self._format_scan_summary(snapshot)
+                start_enabled = True
+                cancel_enabled = False
+            elif snapshot.phase == ScanPhase.CANCELLED:
+                status = StatusText.CANCELLED
+                subtext = "Scan was cancelled"
+                start_enabled = True
+                cancel_enabled = False
+            elif snapshot.phase == ScanPhase.FAILED:
+                status = StatusText.FAILED
+                subtext = "Scan failed"
+                start_enabled = True
+                cancel_enabled = False
+            else:
+                status = StatusText.IDLE
+                subtext = ""
+                start_enabled = True
+                cancel_enabled = False
 
         self._set_ui_state(ScanUIState(
             is_scanning=snapshot.is_active,
@@ -571,20 +646,16 @@ class ScanPage(BaseStation):
             start_enabled=start_enabled,
             cancel_enabled=cancel_enabled,
             options_enabled=not snapshot.is_active,
-        ))
+        ), subtext=subtext)
 
-    def _set_ui_state(self, state: ScanUIState) -> None:
-        """Apply a new UI state to all interactive elements."""
+    def _set_ui_state(self, state: ScanUIState, subtext: str = "") -> None:
+        """Apply a new UI state to all interactive elements. Phase 2: subtext shows stage/summary."""
         self._current_state = state
 
-        # Sticky bar
-        self._sticky.set_summary(state.status_text, "")
+        # Sticky bar (single Start Scan CTA; Phase 5). Phase 2: subtext = stage or summary
+        self._sticky.set_summary(state.status_text, subtext)
         self._sticky.set_primary_enabled(state.start_enabled)
         self._sticky.set_secondary_enabled(state.cancel_enabled)
-
-        # Prominent Start Scan button
-        self._start_scan_btn.setEnabled(state.start_enabled)
-        self._start_scan_btn.setVisible(True)
 
         # Scan filters (media type, engine, scanner tier, experimental)
         if getattr(self, "_media_type_combo", None) is not None:
@@ -796,7 +867,7 @@ class ScanPage(BaseStation):
         return
     
     def _persist_scanner_tier(self) -> None:
-        """Write current scanner tier (core or experimental) to state bus."""
+        """Write current scanner tier (core or experimental) to state bus and config (Phase 4)."""
         try:
             opts = dict(self._bus.get_scan_options() or {})
             if getattr(self, "_experimental_group", None) and self._experimental_group.isChecked():
@@ -806,6 +877,22 @@ class ScanPage(BaseStation):
                 idx = self._scanner_tier_combo.currentIndex()
                 opts["scanner_tier"] = list(CORE_TIERS)[idx]
             self._bus.set_scan_options(opts)
+            self._persist_scan_options_ui()
+        except Exception:
+            pass
+
+    def _persist_scan_options_ui(self) -> None:
+        """Persist scan_options_ui (scanner_tier, media_type, engine) to config (Phase 4)."""
+        try:
+            from cerebro.services.config import load_config, save_config
+            opts = dict(self._bus.get_scan_options() or {})
+            config = load_config()
+            so = dict(getattr(config, "scan_options_ui", None) or {})
+            for key in ("scan_ui_mode", "scanner_tier", "media_type", "engine", "experimental_scanners"):
+                if key in opts:
+                    so[key] = opts[key]
+            config.scan_options_ui = so
+            save_config(config)
         except Exception:
             pass
 
@@ -830,6 +917,26 @@ class ScanPage(BaseStation):
             "Use Settings → Advanced to enable experimental scanners.",
             2000,
         )
+
+    @Slot(int)
+    def _on_media_type_changed(self, index: int) -> None:
+        """Handle media type change; persist to bus and config (Phase 4)."""
+        vals = ("all", "photos", "videos", "audio")
+        media = vals[index] if 0 <= index < len(vals) else "all"
+        opts = dict(self._bus.get_scan_options() or {})
+        opts["media_type"] = media
+        self._bus.set_scan_options(opts)
+        self._persist_scan_options_ui()
+
+    @Slot(int)
+    def _on_engine_changed(self, index: int) -> None:
+        """Handle engine change; persist to bus and config (Phase 4)."""
+        vals = ("simple", "advanced")
+        engine = vals[index] if 0 <= index < len(vals) else "simple"
+        opts = dict(self._bus.get_scan_options() or {})
+        opts["engine"] = engine
+        self._bus.set_scan_options(opts)
+        self._persist_scan_options_ui()
 
     # -------------------------------------------------------------------------
     # Scan lifecycle notifications
@@ -945,6 +1052,19 @@ class ScanPage(BaseStation):
                         self._advanced_options.setVisible(False)
                 self._simple_btn.blockSignals(False)
                 self._advanced_btn.blockSignals(False)
+            # Phase 4: Restore media_type and engine from persisted config
+            media = (opts.get("media_type") or "all").lower()
+            media_map = {"all": 0, "photos": 1, "videos": 2, "audio": 3}
+            if getattr(self, "_media_type_combo", None) is not None and media in media_map:
+                self._media_type_combo.blockSignals(True)
+                self._media_type_combo.setCurrentIndex(media_map[media])
+                self._media_type_combo.blockSignals(False)
+            eng = (opts.get("engine") or "simple").lower()
+            eng_map = {"simple": 0, "advanced": 1}
+            if getattr(self, "_engine_combo", None) is not None and eng in eng_map:
+                self._engine_combo.blockSignals(True)
+                self._engine_combo.setCurrentIndex(eng_map[eng])
+                self._engine_combo.blockSignals(False)
         except Exception:
             pass
 
@@ -967,6 +1087,8 @@ class ScanPage(BaseStation):
         self._scan_in_progress = False
         self._current_scan_id = ""
         self._current_snapshot = None
+        if hasattr(self, "_summary_card") and self._summary_card is not None:
+            self._summary_card.setVisible(False)
         self._set_ui_state(ScanUIState(
             is_scanning=False,
             status_text=StatusText.IDLE,

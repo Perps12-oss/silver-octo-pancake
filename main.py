@@ -17,10 +17,12 @@ if sys.platform == "win32":
         pass
 
 # ============================================================================
-# FORCE DEBUG MODE
+# DEBUG MODE (Phase 19: only set when not already configured for release)
 # ============================================================================
-os.environ["CEREBRO_DEBUG"] = "1"
-os.environ["CEREBRO_PAUSE_EXIT"] = "1"
+if "CEREBRO_DEBUG" not in os.environ:
+    os.environ["CEREBRO_DEBUG"] = "1"
+if "CEREBRO_PAUSE_EXIT" not in os.environ:
+    os.environ["CEREBRO_PAUSE_EXIT"] = "1"
 
 # ============================================================================
 # GLOBAL VARIABLES
@@ -84,11 +86,13 @@ def install_crash_handlers() -> None:
 # SIMPLE MAIN FUNCTION
 # ============================================================================
 def main() -> int:
-    """Simple main function that definitely pauses."""
+    """Simple main function. Pauses on exit only when CEREBRO_PAUSE_EXIT=1 (debug)."""
+    is_debug = os.environ.get("CEREBRO_DEBUG") == "1"
     print(f"\n{'=' * 60}")
     print(f"{APP_NAME} v{APP_VERSION}")
     print(f"{'=' * 60}")
-    print("Starting in DEBUG mode...")
+    if is_debug:
+        print("Starting in DEBUG mode...")
     
     # Install crash handlers
     install_crash_handlers()
@@ -140,20 +144,17 @@ def main() -> int:
         print_step("Showing main window...")
         window.show()
         
-        # Add a debug timer to check window status
-        def check_window():
-            if window.isVisible():
-                print_step("Window is visible", True)
-                print("\n✅ Application is running!")
-                print("✅ Window should be visible on screen")
-                print("✅ Close the window to exit")
-            else:
-                print_step("Window is NOT visible!", False)
-                print("\n⚠️  WARNING: Window is not visible")
-                print("⚠️  This usually means it closed immediately")
-                print("⚠️  Check for errors in the console above")
-        
-        QTimer.singleShot(500, check_window)
+        # Debug: check window status (only when CEREBRO_DEBUG=1)
+        if is_debug:
+            def check_window():
+                if window.isVisible():
+                    print_step("Window is visible", True)
+                    print("\n✅ Application is running!")
+                    print("✅ Close the window to exit")
+                else:
+                    print_step("Window is NOT visible!", False)
+                    print("\n⚠️  WARNING: Window is not visible")
+                QTimer.singleShot(500, check_window)
         
         # Step 6: Run application
         print("\n" + "=" * 60)
@@ -162,8 +163,10 @@ def main() -> int:
         
         result = app.exec()
         
-        print(f"\n📤 Application exited with code: {result}")
-        pause("Application closed. Press ENTER to exit console...")
+        if is_debug:
+            print(f"\n📤 Application exited with code: {result}")
+        if os.environ.get("CEREBRO_PAUSE_EXIT") == "1":
+            pause("Application closed. Press ENTER to exit console...")
         
         return result
         

@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QBrush
 
+from cerebro.scan_result_store import get_scan_result_store
 from cerebro.ui.components.modern import PageScaffold, StickyActionBar
 from cerebro.ui.components.modern._tokens import token as theme_token
 from cerebro.ui.pages.base_station import BaseStation
@@ -680,6 +681,22 @@ def extract_group_data(group: Any, idx: int = 0) -> GroupData:
     return GroupData(paths=[], group_id=idx)
 
 
+def _group_data_from_store_details(details: dict) -> GroupData:
+    """Build GroupData from store get_group_details result (for store-backed load)."""
+    paths = details.get("paths") or []
+    group_index = int(details.get("group_index", 0))
+    total_bytes = int(details.get("total_bytes", 0))
+    file_count = len(paths) or int(details.get("file_count", 0))
+    recoverable = (total_bytes - (total_bytes // file_count)) if file_count else 0
+    return GroupData(
+        paths=paths,
+        hint="",
+        recoverable_bytes=recoverable,
+        similarity=100.0,
+        group_id=group_index,
+    )
+
+
 # ==============================================================================
 # VIRTUALIZED GROUP LIST (model + delegate)
 # ==============================================================================
@@ -689,20 +706,72 @@ GroupDataRole = Qt.UserRole + 1
 CheckedRole = Qt.UserRole + 2
 
 
+_STORE_WINDOW_SIZE = 100
+_STORE_DETAILS_CACHE_MAX = 100
+
+
 class GroupListModel(QAbstractListModel):
-    """List model for virtualized group list. Holds (group_id, GroupData) and checked state per group."""
+    """List model for virtualized group list. Holds (group_id, GroupData) and checked state per group.
+    Supports store-backed mode: rowCount and data from scan result store with windowed fetch and details cache."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._rows: List[Tuple[int, GroupData]] = []
         self._checked: Dict[int, bool] = {}
         self._on_checked_callback: Optional[Callable[[int, bool], None]] = None
+        # Store-backed mode
+        self._store_scan_id: Optional[str] = None
+        self._store_category: Optional[str] = None
+        self._keep_states_ref: Optional[Callable[[], Dict[int, Dict[str, bool]]]] = None
+        self._window_start = -1
+        self._window_rows: List[Dict[str, Any]] = []
+        self._details_cache: Dict[int, GroupData] = {}
 
     def set_checked_callback(self, cb: Callable[[int, bool], None]) -> None:
         self._on_checked_callback = cb
 
+    def set_store_backed(self, scan_id: str, category: Optional[str], keep_states_ref: Callable[[], Dict[int, Dict[str, bool]]]) -> None:
+        """Switch to store-backed mode: count and rows from get_group_count/get_group_window."""
+        self.beginResetModel()
+        self._store_scan_id = scan_id or None
+        self._store_category = category if category and category != "All Files" else None
+        self._keep_states_ref = keep_states_ref
+        self._window_start = -1
+        self._window_rows = []
+        self._details_cache.clear()
+        self.endResetModel()
+
+    def clear_store_backed(self) -> None:
+        """Leave store-backed mode (e.g. when loading legacy payload). Caller should begin/endResetModel if needed."""
+        self._store_scan_id = None
+        self._store_category = None
+        self._keep_states_ref = None
+        self._window_start = -1
+        self._window_rows = []
+        self._details_cache.clear()
+
+    def invalidate_store_cache(self) -> None:
+        """Clear window and details cache so next access refetches (e.g. after deletion)."""
+        self._window_start = -1
+        self._window_rows = []
+        self._details_cache.clear()
+        if self._store_scan_id:
+            self.dataChanged.emit(QModelIndex(), QModelIndex(), [])
+
+    def _ensure_window(self, row: int) -> None:
+        if not self._store_scan_id:
+            return
+        start = (row // _STORE_WINDOW_SIZE) * _STORE_WINDOW_SIZE
+        if start != self._window_start or not self._window_rows:
+            store = get_scan_result_store()
+            self._window_start = start
+            self._window_rows = store.get_group_window(
+                self._store_scan_id, start, _STORE_WINDOW_SIZE, self._store_category
+            )
+
     def set_groups(self, filtered_groups: List[GroupData], keep_states: Dict[int, Dict[str, bool]]) -> None:
         self.beginResetModel()
+        self.clear_store_backed()
         self._rows = [(g.group_id, g) for g in filtered_groups]
         self._checked = {}
         for g in filtered_groups:
@@ -714,12 +783,50 @@ class GroupListModel(QAbstractListModel):
     def rowCount(self, parent=QModelIndex()) -> int:
         if parent.isValid():
             return 0
+        if self._store_scan_id:
+            return get_scan_result_store().get_group_count(self._store_scan_id, self._store_category)
         return len(self._rows)
 
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole) -> Any:
-        if not index.isValid() or index.row() < 0 or index.row() >= len(self._rows):
+        if not index.isValid() or index.row() < 0:
             return None
-        group_id, g = self._rows[index.row()]
+        row = index.row()
+        if self._store_scan_id:
+            self._ensure_window(row)
+            if row < self._window_start or row >= self._window_start + len(self._window_rows):
+                return None
+            row_data = self._window_rows[row - self._window_start]
+            group_index = row_data["group_index"]
+            if role == Qt.DisplayRole:
+                fc = row_data.get("file_count", 0)
+                tb = row_data.get("total_bytes", 0)
+                rec = (tb - (tb // fc)) if fc else 0
+                return f"Group #{group_index + 1}  ·  {fc} files  ·  {format_bytes(rec)}"
+            if role == GroupIdRole:
+                return group_index
+            if role == GroupDataRole:
+                if group_index in self._details_cache:
+                    return self._details_cache[group_index]
+                store = get_scan_result_store()
+                details = store.get_group_details(self._store_scan_id, group_index)
+                if not details:
+                    return None
+                g = _group_data_from_store_details(details)
+                if len(self._details_cache) >= _STORE_DETAILS_CACHE_MAX:
+                    first_key = next(iter(self._details_cache))
+                    del self._details_cache[first_key]
+                self._details_cache[group_index] = g
+                return g
+            if role == CheckedRole:
+                g = self.data(index, GroupDataRole)
+                if not g:
+                    return False
+                keep_map = (self._keep_states_ref() if self._keep_states_ref else {}).get(g.group_id, {})
+                return all(not keep_map.get(_norm_path(p), True) for p in g.paths)
+            return None
+        if row >= len(self._rows):
+            return None
+        group_id, g = self._rows[row]
         if role == Qt.DisplayRole:
             return f"Group #{group_id + 1}  ·  {g.file_count} files  ·  {g.recoverable_formatted}"
         if role == GroupIdRole:
@@ -736,6 +843,11 @@ class GroupListModel(QAbstractListModel):
         group_id = self.data(index, GroupIdRole)
         if group_id is None:
             return False
+        if self._store_scan_id:
+            if self._on_checked_callback:
+                self._on_checked_callback(group_id, bool(value))
+            self.dataChanged.emit(index, index, [CheckedRole])
+            return True
         self._checked[group_id] = bool(value)
         self.dataChanged.emit(index, index, [CheckedRole])
         if self._on_checked_callback:
@@ -743,6 +855,13 @@ class GroupListModel(QAbstractListModel):
         return True
 
     def group_at_row(self, row: int) -> Optional[Tuple[int, GroupData]]:
+        if self._store_scan_id:
+            if row < 0 or row >= self.rowCount():
+                return None
+            g = self.data(self.index(row, 0), GroupDataRole)
+            if g is None:
+                return None
+            return (g.group_id, g)
         if 0 <= row < len(self._rows):
             return self._rows[row]
         return None
@@ -906,9 +1025,18 @@ class DualPaneComparison(QFrame):
             self.file_selected.emit(self._current_paths[1])
 
     def set_comparison(self, paths: List[str], similarity: float = 100.0):
-        self._current_paths = paths
+        self._current_paths = paths or []
+        if not self._current_paths or len(self._current_paths) < 2:
+            self.similarity_label.setText("—")
+            self.similarity_label.setStyleSheet(f"font-size: 28px; font-weight: bold; color: {theme_token('muted')};")
+            self.left_info.setText("No file selected")
+            self.right_info.setText("No file selected")
+            self.left_img.clear()
+            self.left_img.setText("")
+            self.right_img.clear()
+            self.right_img.setText("")
+            return
         self.similarity_label.setText(f"{similarity:.0f}%")
-
         if similarity >= 95:
             color = theme_token("ok")
         elif similarity >= 80:
@@ -916,11 +1044,8 @@ class DualPaneComparison(QFrame):
         else:
             color = theme_token("danger")
         self.similarity_label.setStyleSheet(f"font-size: 28px; font-weight: bold; color: {color};")
-
-        if len(paths) >= 1:
-            self._load_image(self.left_img, self.left_info, paths[0])
-        if len(paths) >= 2:
-            self._load_image(self.right_img, self.right_info, paths[1])
+        self._load_image(self.left_img, self.left_info, self._current_paths[0])
+        self._load_image(self.right_img, self.right_info, self._current_paths[1])
 
     def set_thumbnail_loader(self, loader: Optional[Any]) -> None:
         """Use async loader for images so UI stays responsive (lazy thumbnails)."""
@@ -1088,6 +1213,9 @@ class ReviewPage(BaseStation):
         self._keep_states: Dict[int, Dict[str, bool]] = {}
 
         self._current_filter = "All Files"
+        self._current_scan_id: str = ""
+        self._store_backed: bool = False
+        self._review_state: str = "groups_available"  # loading | no_duplicates | data_unavailable | groups_available
         self._progress_dialog = None
         # Post-deletion result (engine contract): show banner + failure details
         self._last_deletion_deleted: int = 0
@@ -1283,9 +1411,16 @@ class ReviewPage(BaseStation):
 
         layout.addLayout(nav)
 
+        self._empty_state_label = QLabel("")
+        self._empty_state_label.setAlignment(Qt.AlignCenter)
+        self._empty_state_label.setWordWrap(True)
+        self._empty_state_label.setStyleSheet(f"font-size: 14px; color: {theme_token('muted')}; padding: 24px;")
+        self._empty_state_label.hide()
+
         self.comparison = DualPaneComparison()
         self.comparison.file_selected.connect(self._on_comparison_keep_selected)
         self.comparison.set_thumbnail_loader(getattr(self, "_thumb_loader", None))
+        layout.addWidget(self._empty_state_label)
         layout.addWidget(self.comparison, 1)
 
         self.file_list_label = QLabel("Files in this group (Space to toggle, 1-5 to keep specific):")
@@ -1338,8 +1473,10 @@ class ReviewPage(BaseStation):
         self.detail_size = QLabel("Size: -")
         self.detail_modified = QLabel("Modified: -")
         self.detail_category = QLabel("Category: -")
+        self.detail_match_type = QLabel("Match type: —")
+        self.detail_match_type.setToolTip("How duplicates were grouped: exact hash, partial, or perceptual")
 
-        for lbl in [self.detail_name, self.detail_path, self.detail_size, self.detail_modified, self.detail_category]:
+        for lbl in [self.detail_name, self.detail_path, self.detail_size, self.detail_modified, self.detail_category, self.detail_match_type]:
             lbl.setStyleSheet("font-size: 12px; padding: 2px 0;")
             details_layout.addWidget(lbl)
 
@@ -1347,6 +1484,8 @@ class ReviewPage(BaseStation):
         layout.addWidget(details)
 
         smart = QGroupBox("Smart Select (Applies to FILTERED groups)")
+        smart.setObjectName("SmartSelectGroupBox")
+        self._smart_select_groupbox = smart
         smart_layout = QVBoxLayout(smart)
 
         smart_buttons = [
@@ -1431,16 +1570,48 @@ class ReviewPage(BaseStation):
     @Slot(dict)
     def load_scan_result(self, result: dict):
         self._result = dict(result or {})
-        groups_raw = self._result.get("groups") or []
+        scan_id = (self._result.get("scan_id") or "").strip()
+        result_store_path = (self._result.get("result_store_path") or "").strip()
 
-        self._all_groups = [extract_group_data(g, i) for i, g in enumerate(groups_raw)]
-        self._apply_filter()
-
-        self._keep_states.clear()
-        for g in self._all_groups:
-            self._keep_states[g.group_id] = {_norm_path(p): True for p in g.paths}
-
-        self._current_group_idx = 0 if self._filtered_groups else -1
+        store = get_scan_result_store()
+        if result_store_path and scan_id and store.has_scan(scan_id):
+            self._store_backed = True
+            self._current_scan_id = scan_id
+            summary = store.get_scan_summary(scan_id)
+            if summary:
+                self._result.update(summary)
+            self._all_groups = []
+            self._filtered_groups = []
+            self._keep_states.clear()
+            self._keep_states.update(store.get_selection_state(scan_id))
+            count = store.get_group_count(scan_id, None)
+            self._review_state = "no_duplicates" if count == 0 else "groups_available"
+            self._current_group_idx = 0 if count > 0 else -1
+            self._populate_filter_combo_store_backed(store, scan_id)
+        else:
+            # No store available: fallback to payload["groups"] when present (e.g. store write failed per design §9)
+            self._store_backed = False
+            groups_raw = self._result.get("groups") or []
+            if groups_raw:
+                self._current_scan_id = (self._result.get("scan_id") or "").strip()
+                self._all_groups = [extract_group_data(g, i) for i, g in enumerate(groups_raw)]
+                self._apply_filter()
+                self._keep_states.clear()
+                for g in self._all_groups:
+                    self._keep_states[g.group_id] = {_norm_path(p): True for p in g.paths}
+                self._current_group_idx = 0 if self._filtered_groups else -1
+                self._review_state = "no_duplicates" if not self._filtered_groups else "groups_available"
+            else:
+                self._current_scan_id = ""
+                self._all_groups = []
+                self._filtered_groups = []
+                self._keep_states.clear()
+                self._current_group_idx = -1
+                self._review_state = "data_unavailable"
+            self.filter_combo.blockSignals(True)
+            self.filter_combo.clear()
+            self.filter_combo.addItems(["All Files", "Images", "Videos", "Audio", "Archives", "Documents", "Other"])
+            self.filter_combo.blockSignals(False)
 
         self._populate_group_list()
         self._update_display()
@@ -1454,28 +1625,63 @@ class ReviewPage(BaseStation):
         self._current_filter = filter_text
         self._apply_filter()
         self._populate_group_list()
-        self._current_group_idx = 0 if self._filtered_groups else -1
+        self._current_group_idx = 0 if self._filtered_count() else -1
         self._update_display()
         self._update_stats()
 
+    def _store_category_for_filter(self) -> Optional[str]:
+        """Category for store queries: None = All Files."""
+        if self._current_filter == "All Files":
+            return None
+        return self._current_filter
+
+    def _populate_filter_combo_store_backed(self, store: Any, scan_id: str) -> None:
+        """Set filter combo to All Files + categories present in scan (store-backed)."""
+        categories = store.get_categories(scan_id)
+        self.filter_combo.blockSignals(True)
+        self.filter_combo.clear()
+        self.filter_combo.addItem("All Files")
+        for cat in categories:
+            self.filter_combo.addItem(cat)
+        self.filter_combo.blockSignals(False)
+
     def _apply_filter(self):
+        if self._store_backed:
+            return
         if self._current_filter == "All Files":
             self._filtered_groups = list(self._all_groups)
         else:
             self._filtered_groups = [
-                g for g in self._all_groups 
+                g for g in self._all_groups
                 if g.get_category() == self._current_filter
             ]
 
+    def _filtered_count(self) -> int:
+        """Number of groups in current view (filtered or store-backed)."""
+        if self._store_backed:
+            return self._group_list_model.rowCount()
+        return len(self._filtered_groups)
+
     def _get_current_group(self):
+        if self._store_backed:
+            t = self._group_list_model.group_at_row(self._current_group_idx)
+            return t[1] if t else None
         if 0 <= self._current_group_idx < len(self._filtered_groups):
             return self._filtered_groups[self._current_group_idx]
         return None
 
     def _populate_group_list(self):
         """Refresh virtualized list model and sync selection to current group."""
-        self._group_list_model.set_groups(self._filtered_groups, self._keep_states)
-        if self._filtered_groups and 0 <= self._current_group_idx < len(self._filtered_groups):
+        if self._store_backed:
+            self._group_list_model.set_store_backed(
+                self._current_scan_id,
+                self._store_category_for_filter(),
+                lambda: self._keep_states,
+            )
+        else:
+            self._group_list_model.set_groups(self._filtered_groups, self._keep_states)
+        cnt = self._filtered_count()
+        if cnt and 0 <= self._current_group_idx < cnt:
             self._group_list_view.setCurrentIndex(self._group_list_model.index(self._current_group_idx, 0))
         else:
             self._group_list_view.clearSelection()
@@ -1489,14 +1695,49 @@ class ReviewPage(BaseStation):
         idx = self._group_list_view.currentIndex()
         if idx.isValid():
             row = idx.row()
-            if 0 <= row < len(self._filtered_groups):
+            if 0 <= row < self._filtered_count():
                 self._current_group_idx = row
                 self._update_display()
+
+    def _clear_selection_display(self) -> None:
+        """When no group is selected or no groups: clear comparison, file table, preview; show empty-state message; disable actions."""
+        self.comparison.set_comparison([], 0)
+        self.file_table.setRowCount(0)
+        self.group_counter.setText("No group selected")
+        self.prev_group_btn.setEnabled(False)
+        self.next_group_btn.setEnabled(False)
+        self.detail_name.setText("—")
+        self.detail_path.setText("—")
+        self.detail_size.setText("—")
+        self.detail_modified.setText("—")
+        self.detail_category.setText("—")
+        if hasattr(self, "detail_match_type") and self.detail_match_type:
+            self.detail_match_type.setText("Match type: —")
+        self.preview_label.clear()
+        self.preview_label.setText("No file selected")
+        self.preview_label.setStyleSheet("font-size: 14px; color: var(--muted, #888);")
+        if self._review_state == "no_duplicates":
+            self._empty_state_label.setText("No duplicates found.\nRun a scan or try a different folder.")
+        elif self._review_state == "data_unavailable":
+            self._empty_state_label.setText("Review data unavailable.\nScan may have failed to save results, or no scan has been loaded.")
+        else:
+            self._empty_state_label.setText("Select a group from the list to compare and choose which files to keep.")
+        self._empty_state_label.show()
+        self.select_all_cb.setEnabled(self._filtered_count() > 0)
+        if hasattr(self, "smart_select_fab") and self.smart_select_fab is not None:
+            self.smart_select_fab.setEnabled(False)
+        smart_box = getattr(self, "_smart_select_groupbox", None)
+        if smart_box is not None:
+            smart_box.setEnabled(False)
 
     def _update_display(self):
         group = self._get_current_group()
         if not group:
+            self._clear_selection_display()
             return
+        self._empty_state_label.hide()
+        if self._store_backed and group.group_id not in self._keep_states:
+            self._keep_states[group.group_id] = {_norm_path(p): True for p in group.paths}
         # Keep list view selection in sync with _current_group_idx (e.g. after Prev/Next)
         if self._group_list_view.currentIndex().row() != self._current_group_idx:
             self._group_list_view.setCurrentIndex(self._group_list_model.index(self._current_group_idx, 0))
@@ -1504,11 +1745,11 @@ class ReviewPage(BaseStation):
         keep_map = self._keep_states.get(group.group_id, {})
 
         self.group_counter.setText(
-            f"Group {self._current_group_idx + 1} of {len(self._filtered_groups)} "
+            f"Group {self._current_group_idx + 1} of {self._filtered_count()} "
             f"(ID: {group.group_id + 1})"
         )
         self.prev_group_btn.setEnabled(self._current_group_idx > 0)
-        self.next_group_btn.setEnabled(self._current_group_idx < len(self._filtered_groups) - 1)
+        self.next_group_btn.setEnabled(self._current_group_idx < self._filtered_count() - 1)
 
         display_paths = group.paths[:2] if len(group.paths) >= 2 else group.paths
         self.comparison.set_comparison(display_paths, group.similarity)
@@ -1519,6 +1760,10 @@ class ReviewPage(BaseStation):
         preview_file = kept_files[0] if kept_files else (group.paths[0] if group.paths else None)
         if preview_file:
             self._update_preview(preview_file)
+        # Phase 14: Match truth - show grouping reason (default: Exact hash; engine can extend)
+        match_type = getattr(group, "match_type", None) or "Exact hash"
+        if hasattr(self, "detail_match_type") and self.detail_match_type:
+            self.detail_match_type.setText(f"Match type: {match_type}")
 
         # List view selection already reflects current group; no need to set_selected on items.
 
@@ -1590,25 +1835,55 @@ class ReviewPage(BaseStation):
             self.detail_modified.setText("Modified: -")
 
     def _update_stats(self):
-        total_groups = len(self._filtered_groups)
-        total_files = sum(g.file_count for g in self._filtered_groups)
-        total_size = sum(g.recoverable_bytes for g in self._filtered_groups)
+        if self._store_backed:
+            total_groups = self._filtered_count()
+            store = get_scan_result_store()
+            total_files = 0
+            total_size = 0
+            chunk = 500
+            for offset in range(0, total_groups, chunk):
+                window = store.get_group_window(
+                    self._current_scan_id, offset, chunk, self._store_category_for_filter()
+                )
+                for row in window:
+                    total_files += row.get("file_count", 0)
+                    tb = row.get("total_bytes", 0)
+                    fc = row.get("file_count", 1)
+                    total_size += (tb - (tb // fc)) if fc else 0
+        else:
+            total_groups = len(self._filtered_groups)
+            total_files = sum(g.file_count for g in self._filtered_groups)
+            total_size = sum(g.recoverable_bytes for g in self._filtered_groups)
 
         delete_count = 0
         delete_size = 0
-        for g in self._filtered_groups:
-            keep_map = self._keep_states.get(g.group_id, {})
-            for p in g.paths:
-                if not keep_map.get(_norm_path(p), True):
-                    delete_count += 1
-                    try:
-                        delete_size += os.path.getsize(p)
-                    except:
-                        pass
+        if self._store_backed:
+            for _group_id, keep_map in self._keep_states.items():
+                for path, keep in keep_map.items():
+                    if not keep:
+                        delete_count += 1
+                        try:
+                            delete_size += os.path.getsize(path)
+                        except Exception:
+                            pass
+        else:
+            for g in self._filtered_groups:
+                keep_map = self._keep_states.get(g.group_id, {})
+                for p in g.paths:
+                    if not keep_map.get(_norm_path(p), True):
+                        delete_count += 1
+                        try:
+                            delete_size += os.path.getsize(p)
+                        except Exception:
+                            pass
 
         keeper_count = total_files - delete_count
         self.quick_stats.setText(f"{total_groups} groups • {total_files} files • {format_bytes(total_size)}")
-        self.left_summary.setText(f"Showing {total_groups} of {len(self._all_groups)} groups")
+        if self._store_backed:
+            total_in_scan = get_scan_result_store().get_group_count(self._current_scan_id, None)
+            self.left_summary.setText(f"Showing {total_groups} of {total_in_scan} groups")
+        else:
+            self.left_summary.setText(f"Showing {total_groups} of {len(self._all_groups)} groups")
         self.status_text.setText(f"{delete_count} files marked for deletion")
         self.deletion_summary_label.setText(
             f"Selected for delete: {delete_count}  ·  Protected/keeper: {keeper_count}"
@@ -1622,6 +1897,11 @@ class ReviewPage(BaseStation):
         safe_count = total_files - delete_count
         if hasattr(self, "smart_select_fab"):
             self.smart_select_fab.setText(f"Smart Select\n{safe_count} safe")
+            self.smart_select_fab.setEnabled(total_groups > 0)
+        if hasattr(self, "select_all_cb") and self.select_all_cb is not None:
+            self.select_all_cb.setEnabled(total_groups > 0)
+        if getattr(self, "_smart_select_groupbox", None) is not None:
+            self._smart_select_groupbox.setEnabled(total_groups > 0)
         # Sync large sticky delete button (Part 7)
         if hasattr(self, "_sticky") and self._sticky is not None:
             try:
@@ -1665,43 +1945,78 @@ class ReviewPage(BaseStation):
         keep_map = self._keep_states.get(group.group_id, {})
         for i, p in enumerate(group.paths):
             keep_map[_norm_path(p)] = (i == idx)
-
+        if self._store_backed:
+            get_scan_result_store().set_selection_state_group(
+                self._current_scan_id, group.group_id, dict(keep_map)
+            )
         self._update_display()
         self._update_stats()
 
     def _on_group_clicked(self, group_id: int):
-        for i, g in enumerate(self._filtered_groups):
-            if g.group_id == group_id:
-                self._current_group_idx = i
-                break
+        if self._store_backed:
+            for row in range(self._filtered_count()):
+                if self._group_list_model.data(
+                    self._group_list_model.index(row, 0), GroupIdRole
+                ) == group_id:
+                    self._current_group_idx = row
+                    break
+        else:
+            for i, g in enumerate(self._filtered_groups):
+                if g.group_id == group_id:
+                    self._current_group_idx = i
+                    break
         self._update_display()
 
     def _on_group_checkbox_changed(self, group_id: int, checked: bool):
+        if self._store_backed:
+            store = get_scan_result_store()
+            details = store.get_group_details(self._current_scan_id, group_id)
+            if not details:
+                return
+            paths = details.get("paths") or []
+            keep_map = self._keep_states.setdefault(group_id, {})
+            if not keep_map:
+                keep_map.update({_norm_path(p): True for p in paths})
+                self._keep_states[group_id] = keep_map
+            if checked:
+                for i, p in enumerate(paths):
+                    keep_map[_norm_path(p)] = (i == 0)
+            else:
+                for p in paths:
+                    keep_map[_norm_path(p)] = True
+            store.set_selection_state_group(self._current_scan_id, group_id, dict(keep_map))
+            self._update_display()
+            self._update_stats()
+            return
         group = None
         for g in self._all_groups:
             if g.group_id == group_id:
                 group = g
                 break
-
         if not group:
             return
-
         keep_map = self._keep_states.get(group_id, {})
-
         if checked:
             for i, p in enumerate(group.paths):
                 keep_map[_norm_path(p)] = (i == 0)
         else:
             for p in group.paths:
                 keep_map[_norm_path(p)] = True
-
         self._update_display()
         self._update_stats()
 
     def _on_select_all_changed(self, state):
         check = (state == Qt.Checked)
-        for g in self._filtered_groups:
-            self._on_group_checkbox_changed(g.group_id, check)
+        if self._store_backed:
+            for row in range(self._filtered_count()):
+                group_id = self._group_list_model.data(
+                    self._group_list_model.index(row, 0), GroupIdRole
+                )
+                if group_id is not None:
+                    self._on_group_checkbox_changed(group_id, check)
+        else:
+            for g in self._filtered_groups:
+                self._on_group_checkbox_changed(g.group_id, check)
 
     def _on_file_table_changed(self, item):
         if item.column() != 0:
@@ -1724,6 +2039,10 @@ class ReviewPage(BaseStation):
             keep_map[key] = True
             QMessageBox.warning(self, "Invalid Selection", "You must keep at least one file per group.")
 
+        if self._store_backed:
+            get_scan_result_store().set_selection_state(
+                self._current_scan_id, group.group_id, key, keep_map[key]
+            )
         self._update_stats()
 
     def _on_comparison_keep_selected(self, file_path: str):
@@ -1735,7 +2054,10 @@ class ReviewPage(BaseStation):
         file_norm = _norm_path(file_path)
         for p in keep_map:
             keep_map[p] = (p == file_norm)
-
+        if self._store_backed:
+            get_scan_result_store().set_selection_state_group(
+                self._current_scan_id, group.group_id, dict(keep_map)
+            )
         self._update_display()
         self._update_stats()
 
@@ -1745,7 +2067,7 @@ class ReviewPage(BaseStation):
             self._update_display()
 
     def _next_group(self):
-        if self._current_group_idx < len(self._filtered_groups) - 1:
+        if self._current_group_idx < self._filtered_count() - 1:
             self._current_group_idx += 1
             self._update_display()
 
@@ -1765,38 +2087,65 @@ class ReviewPage(BaseStation):
         self._apply_smart_to_filtered("first")
 
     def _apply_smart_to_filtered(self, criteria: str):
-        if not self._filtered_groups:
-            return
-
         applied_count = 0
-
-        for group in self._filtered_groups:
-            keep_map = self._keep_states.get(group.group_id, {})
-
-            try:
-                if criteria == "first" and group.paths:
-                    keeper = group.paths[0]
-                elif criteria == "oldest" and group.paths:
-                    keeper = min(group.paths, key=lambda p: os.path.getmtime(p))
-                elif criteria == "newest" and group.paths:
-                    keeper = max(group.paths, key=lambda p: os.path.getmtime(p))
-                elif criteria == "largest" and group.paths:
-                    keeper = max(group.paths, key=lambda p: os.path.getsize(p))
-                elif criteria == "smallest" and group.paths:
-                    keeper = min(group.paths, key=lambda p: os.path.getsize(p))
-                else:
+        if self._store_backed:
+            for row in range(self._filtered_count()):
+                t = self._group_list_model.group_at_row(row)
+                if not t:
                     continue
-
-                for p in group.paths:
-                    keep_map[_norm_path(p)] = (_norm_path(p) == _norm_path(keeper))
-
-                applied_count += 1
-            except Exception:
-                continue
+                group = t[1]
+                keep_map = self._keep_states.get(group.group_id, {})
+                if not keep_map:
+                    keep_map = {_norm_path(p): True for p in group.paths}
+                    self._keep_states[group.group_id] = keep_map
+                try:
+                    if criteria == "first" and group.paths:
+                        keeper = group.paths[0]
+                    elif criteria == "oldest" and group.paths:
+                        keeper = min(group.paths, key=lambda p: os.path.getmtime(p))
+                    elif criteria == "newest" and group.paths:
+                        keeper = max(group.paths, key=lambda p: os.path.getmtime(p))
+                    elif criteria == "largest" and group.paths:
+                        keeper = max(group.paths, key=lambda p: os.path.getsize(p))
+                    elif criteria == "smallest" and group.paths:
+                        keeper = min(group.paths, key=lambda p: os.path.getsize(p))
+                    else:
+                        continue
+                    for p in group.paths:
+                        keep_map[_norm_path(p)] = (_norm_path(p) == _norm_path(keeper))
+                    applied_count += 1
+                    get_scan_result_store().set_selection_state_group(
+                        self._current_scan_id, group.group_id, dict(keep_map)
+                    )
+                except Exception:
+                    continue
+        else:
+            if not self._filtered_groups:
+                self._bus.notify("Smart Select Applied", "No groups to apply to.", 2000)
+                return
+            for group in self._filtered_groups:
+                keep_map = self._keep_states.get(group.group_id, {})
+                try:
+                    if criteria == "first" and group.paths:
+                        keeper = group.paths[0]
+                    elif criteria == "oldest" and group.paths:
+                        keeper = min(group.paths, key=lambda p: os.path.getmtime(p))
+                    elif criteria == "newest" and group.paths:
+                        keeper = max(group.paths, key=lambda p: os.path.getmtime(p))
+                    elif criteria == "largest" and group.paths:
+                        keeper = max(group.paths, key=lambda p: os.path.getsize(p))
+                    elif criteria == "smallest" and group.paths:
+                        keeper = min(group.paths, key=lambda p: os.path.getsize(p))
+                    else:
+                        continue
+                    for p in group.paths:
+                        keep_map[_norm_path(p)] = (_norm_path(p) == _norm_path(keeper))
+                    applied_count += 1
+                except Exception:
+                    continue
 
         self._update_display()
         self._update_stats()
-
         self._bus.notify(
             "Smart Select Applied",
             f"Applied '{criteria}' to {applied_count} groups",
@@ -1818,34 +2167,64 @@ class ReviewPage(BaseStation):
         total_delete_size = 0
         skipped_groups = 0
 
-        for idx, g in enumerate(self._filtered_groups):
-            keep_map = self._keep_states.get(g.group_id, {})
-            kept_paths = [p for p in g.paths if keep_map.get(_norm_path(p), True)]
-            delete_paths = [p for p in g.paths if not keep_map.get(_norm_path(p), True)]
-
-            if not delete_paths:
-                continue
-            # Pipeline requires exactly one "keep" per group
-            keep_path = kept_paths[0] if kept_paths else g.paths[0]
-            keep_path = str(keep_path) if keep_path else ""
-            delete_paths_str = [str(p) for p in delete_paths if p]
-            if not keep_path or not os.path.exists(keep_path):
-                skipped_groups += 1
-                try:
-                    from cerebro.services.logger import log_debug
-                    log_debug(f"[DEBUG] _open_ceremony: skipping group {idx} — keep_path missing: {keep_path!r}")
-                except Exception:
-                    pass
-                continue
-            group_size = sum(os.path.getsize(p) for p in delete_paths if os.path.exists(p))
-            total_delete_size += group_size
-            delete_groups.append({
-                "group_index": idx,
-                "keep": keep_path,
-                "delete": delete_paths_str,
-                "hint": g.hint,
-                "recoverable_bytes": group_size,
-            })
+        if self._store_backed:
+            store = get_scan_result_store()
+            category = self._store_category_for_filter()
+            count = store.get_group_count(self._current_scan_id, category)
+            for offset in range(0, count, 200):
+                window = store.get_group_window(
+                    self._current_scan_id, offset, 200, category
+                )
+                for row in window:
+                    gi = row["group_index"]
+                    keep_map = self._keep_states.get(gi, {})
+                    if not keep_map:
+                        continue
+                    details = store.get_group_details(self._current_scan_id, gi)
+                    if not details:
+                        continue
+                    paths = details.get("paths") or []
+                    kept_paths = [p for p in paths if keep_map.get(_norm_path(p), True)]
+                    delete_paths = [p for p in paths if not keep_map.get(_norm_path(p), True)]
+                    if not delete_paths:
+                        continue
+                    keep_path = kept_paths[0] if kept_paths else (paths[0] if paths else "")
+                    keep_path = str(keep_path) if keep_path else ""
+                    delete_paths_str = [str(p) for p in delete_paths if p]
+                    if not keep_path or not os.path.exists(keep_path):
+                        skipped_groups += 1
+                        continue
+                    group_size = sum(os.path.getsize(p) for p in delete_paths if os.path.exists(p))
+                    total_delete_size += group_size
+                    delete_groups.append({
+                        "group_index": gi,
+                        "keep": keep_path,
+                        "delete": delete_paths_str,
+                        "hint": "",
+                        "recoverable_bytes": group_size,
+                    })
+        else:
+            for idx, g in enumerate(self._filtered_groups):
+                keep_map = self._keep_states.get(g.group_id, {})
+                kept_paths = [p for p in g.paths if keep_map.get(_norm_path(p), True)]
+                delete_paths = [p for p in g.paths if not keep_map.get(_norm_path(p), True)]
+                if not delete_paths:
+                    continue
+                keep_path = kept_paths[0] if kept_paths else g.paths[0]
+                keep_path = str(keep_path) if keep_path else ""
+                delete_paths_str = [str(p) for p in delete_paths if p]
+                if not keep_path or not os.path.exists(keep_path):
+                    skipped_groups += 1
+                    continue
+                group_size = sum(os.path.getsize(p) for p in delete_paths if os.path.exists(p))
+                total_delete_size += group_size
+                delete_groups.append({
+                    "group_index": idx,
+                    "keep": keep_path,
+                    "delete": delete_paths_str,
+                    "hint": g.hint,
+                    "recoverable_bytes": group_size,
+                })
 
         try:
             from cerebro.services.logger import log_debug
@@ -1909,6 +2288,45 @@ class ReviewPage(BaseStation):
 
     def _on_export_list(self):
         """Export current duplicate groups to a text file."""
+        if self._store_backed:
+            store = get_scan_result_store()
+            category = self._store_category_for_filter()
+            count = store.get_group_count(self._current_scan_id, category)
+            if count == 0:
+                QMessageBox.information(
+                    self, "Export List", "No duplicate groups to export. Run a scan first."
+                )
+                return
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Export duplicate list", "", "Text files (*.txt);;All files (*)"
+            )
+            if not path:
+                return
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write("CEREBRO duplicate list export\n")
+                    f.write("=" * 60 + "\n\n")
+                    for offset in range(0, count, 200):
+                        window = store.get_group_window(
+                            self._current_scan_id, offset, 200, category
+                        )
+                        for row in window:
+                            details = store.get_group_details(
+                                self._current_scan_id, row["group_index"]
+                            )
+                            if not details:
+                                continue
+                            g = _group_data_from_store_details(details)
+                            f.write(f"Group {g.group_id + 1} (duplicate)\n")
+                            for p in g.paths:
+                                f.write(f"  {p}\n")
+                            f.write("\n")
+                QMessageBox.information(
+                    self, "Export List", f"Exported {count} groups to:\n{path}"
+                )
+            except OSError as e:
+                QMessageBox.warning(self, "Export failed", f"Could not write file:\n{e}")
+            return
         groups = self._filtered_groups if self._filtered_groups else self._all_groups
         if not groups:
             QMessageBox.information(
@@ -1987,6 +2405,20 @@ class ReviewPage(BaseStation):
                 pass
             return
         if not deleted_norm:
+            return
+
+        if self._store_backed:
+            for group_id in list(self._keep_states.keys()):
+                keep_map = self._keep_states[group_id]
+                new_map = {k: v for k, v in keep_map.items() if k not in deleted_norm}
+                if new_map:
+                    self._keep_states[group_id] = new_map
+                else:
+                    self._keep_states.pop(group_id, None)
+            self._group_list_model.invalidate_store_cache()
+            self._update_display()
+            self._update_stats()
+            self._refresh_delete_button()
             return
 
         new_all_groups: List[GroupData] = []

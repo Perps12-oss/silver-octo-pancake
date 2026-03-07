@@ -166,7 +166,7 @@ class HistoryPage(BaseStation):
         item = {
             "when": result.get("timestamp") or "",
             "root": result.get("scan_root") or result.get("root") or "",
-            "groups": len(result.get("groups") or []),
+            "groups": int(result.get("groups_count", 0) or 0) or len(result.get("groups") or []),
             "files": int(result.get("file_count", 0) or 0),
             "status": "completed",
             "payload": dict(result or {}),

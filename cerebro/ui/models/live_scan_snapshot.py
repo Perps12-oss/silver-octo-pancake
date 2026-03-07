@@ -160,6 +160,8 @@ class LiveScanSnapshot:
     # Results
     groups_found: int = 0
     duplicates_found: int = 0
+    files_skipped: int = 0
+    errors_count: int = 0
     warnings: List[str] = field(default_factory=list)
     warnings_count: int = 0
     
@@ -282,6 +284,10 @@ class LiveScanSnapshot:
         if warnings is not None:
             self.warnings = warnings[:10]
             self.warnings_count = len(warnings)
+        if kwargs.get("files_skipped") is not None:
+            self.files_skipped = max(0, int(kwargs["files_skipped"]))
+        if kwargs.get("errors_count") is not None:
+            self.errors_count = max(0, int(kwargs["errors_count"]))
         self._update_throughput(now)
         self._apply_validity_rules(now)
         self._last_update_time = now
@@ -302,6 +308,8 @@ class LiveScanSnapshot:
         self.bytes_total = None
         self.groups_found = 0
         self.duplicates_found = 0
+        self.files_skipped = 0
+        self.errors_count = 0
         self.warnings.clear()
         self.warnings_count = 0
         self.progress_normalized = 0.0
@@ -337,6 +345,15 @@ class LiveScanSnapshot:
         else:
             self.is_cancelling = True
             self.current_operation = "Cancelling…"
+
+    def fail_scan(self, _error: str = "") -> None:
+        """Mark scan as failed."""
+        self.phase = ScanPhase.FAILED
+        self.is_active = False
+        self.is_cancelling = False
+        self.current_file = None
+        self.current_operation = None
+        self.throughput.is_measuring = False
     
     def pause_scan(self) -> None:
         """Pause the scan."""
@@ -588,14 +605,17 @@ class LiveScanSnapshot:
     # ------------------------------------------------------------------------
     
     def format_files_processed(self) -> str:
-        """Format files processed with skeleton for unknowns."""
+        """Format files processed with skeleton for unknowns. Shows skipped when > 0."""
         if not self.validity.has_file_counts:
             return "—"
-        
+        base = ""
         if self.files_total is not None:
-            return f"{self.files_processed:,}/{self.files_total:,}"
+            base = f"{self.files_processed:,}/{self.files_total:,}"
         else:
-            return f"{self.files_processed:,}"
+            base = f"{self.files_processed:,}"
+        if self.files_skipped > 0:
+            base += f" ({self.files_skipped:,} skipped)"
+        return base
     
     def format_bytes_processed(self) -> str:
         """Format bytes processed with skeleton for unknowns."""

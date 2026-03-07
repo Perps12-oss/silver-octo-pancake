@@ -145,6 +145,7 @@ class StartPage(BaseStation):
         self._resume_btn.setEnabled(False)
         self._resume_btn.clicked.connect(self._on_resume)
         self._resume_label = QLabel("No interrupted scan to resume")
+        self._resume_label.setToolTip("Resume a scan that was cancelled before completion")
         self._resume_label.setStyleSheet(f"color: {theme_token('muted')}; font-size: 12px;")
         layout.addWidget(self._resume_btn)
         layout.addWidget(self._resume_label, 1)
@@ -169,13 +170,21 @@ class StartPage(BaseStation):
             pass
 
     def _update_recent_scan_label(self) -> None:
-        """Set recent scan summary from bus (last_scan_summary)."""
+        """Set recent scan summary from bus (last_scan_summary). Phase 15: clearer summary."""
         summary = self._bus.get_last_scan_summary() or {}
         groups = int(summary.get("groups") or 0)
+        files = summary.get("files")
         root = str(summary.get("root") or "")
-        if groups > 0 or root:
+        if groups > 0 or root or (files is not None and files > 0):
+            parts = []
+            if groups > 0:
+                parts.append(f"{groups} group{'s' if groups != 1 else ''}")
+            if files is not None and files > 0:
+                parts.append(f"{files:,} file{'s' if files != 1 else ''}")
             root_short = (Path(root).name or root or "—") if root else "—"
-            self._recent_label.setText(f"Recent scan: {groups} groups · {root_short}")
+            if root_short and root_short != "—":
+                parts.append(root_short)
+            self._recent_label.setText("Recent scan: " + " · ".join(parts))
         else:
             self._recent_label.setText("Recent scan: Run a scan to see summary")
 
@@ -192,8 +201,15 @@ class StartPage(BaseStation):
             payload = store.get_latest_resume_payload()
             if hasattr(self, "_resume_btn") and self._resume_btn and hasattr(self, "_resume_label") and self._resume_label:
                 if payload:
-                    self._resume_btn.setEnabled(True)
-                    self._resume_label.setText("Resume interrupted scan")
+                    # Phase 4: Verify root folder exists before enabling Resume
+                    root = str((payload.config or {}).get("root", ""))
+                    root_ok = bool(root and Path(root).is_dir())
+                    if root_ok:
+                        self._resume_btn.setEnabled(True)
+                        self._resume_label.setText("Resume interrupted scan")
+                    else:
+                        self._resume_btn.setEnabled(False)
+                        self._resume_label.setText("Resume unavailable (folder not found)")
                 else:
                     self._resume_btn.setEnabled(False)
                     self._resume_label.setText("No interrupted scan to resume")

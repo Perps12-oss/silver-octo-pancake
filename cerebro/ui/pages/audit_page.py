@@ -915,7 +915,12 @@ class AuditPage(BaseStation):
         root.setSpacing(0)
         self._scaffold = PageScaffold(self, show_sidebar=False, show_sticky_action=False)
         root.addWidget(self._scaffold)
-        self._scaffold.set_header(PageHeader("Audit", "System integrity checks, reports, and data validation"))
+        self._scaffold.set_header(PageHeader(
+            "Audit",
+            "System integrity checks, reports, and data validation. "
+            "Deletion scope: only files you explicitly select in Review are deleted; "
+            "Trash mode sends to Recycle Bin; Permanent mode removes irreversibly."
+        ))
         content = QHBoxLayout()
         content.setSpacing(PAGE_SPACING)
         left = QVBoxLayout()

@@ -252,9 +252,13 @@ class LiveScanPanel(QFrame):
         stats_grid.addWidget(self._files_label, 0, 1)
         stats_grid.addWidget(QLabel("Size:"), 0, 2)
         stats_grid.addWidget(self._size_label, 0, 3)
-        stats_grid.addWidget(QLabel("Speed:"), 1, 0)
+        speed_header = QLabel("Speed:")
+        speed_header.setToolTip("Analysis speed (files processed per second)")
+        stats_grid.addWidget(speed_header, 1, 0)
         stats_grid.addWidget(self._speed_label, 1, 1)
-        stats_grid.addWidget(QLabel("Throughput:"), 1, 2)
+        throughput_header = QLabel("Throughput:")
+        throughput_header.setToolTip("Data throughput (MB/s read during hashing)")
+        stats_grid.addWidget(throughput_header, 1, 2)
         stats_grid.addWidget(self._throughput_label, 1, 3)
         
         layout.addLayout(stats_grid)
@@ -281,9 +285,13 @@ class LiveScanPanel(QFrame):
         
         self._groups_frame = self._create_result_frame("Groups found", "0")
         self._dupes_frame = self._create_result_frame("Duplicates", "0")
+        self._result_status_label = QLabel("")
+        self._result_status_label.setObjectName("ResultStatusLabel")
+        self._result_status_label.setStyleSheet("color: rgba(160,174,192,0.9); font-size: 11px;")
         
         results_layout.addWidget(self._groups_frame)
         results_layout.addWidget(self._dupes_frame)
+        results_layout.addWidget(self._result_status_label, 1, Qt.AlignmentFlag.AlignRight)
         
         layout.addLayout(results_layout)
         
@@ -441,11 +449,22 @@ class LiveScanPanel(QFrame):
             self.reset()
             return
 
-        # Update phase and progress; never leave "Discovering…" after completion
+        # Update phase and progress; explicit outcome per checklist §1
         if snapshot.phase == ScanPhase.COMPLETED or snapshot.progress_weighted >= 1.0:
-            self._phase_label.setText("Scan complete")
             self._progress_ring.set_progress(1.0)
             self._progress_ring.set_phase(ScanPhase.COMPLETED)
+            if snapshot.groups_found == 0:
+                self._phase_label.setText("Scan complete — no duplicates found")
+            else:
+                self._phase_label.setText("Scan complete — duplicates found")
+        elif snapshot.phase == ScanPhase.CANCELLED:
+            self._phase_label.setText("Scan cancelled")
+            self._progress_ring.set_progress(snapshot.progress_weighted)
+            self._progress_ring.set_phase(ScanPhase.CANCELLED)
+        elif snapshot.phase == ScanPhase.FAILED:
+            self._phase_label.setText("Scan failed")
+            self._progress_ring.set_progress(snapshot.progress_weighted)
+            self._progress_ring.set_phase(ScanPhase.FAILED)
         else:
             self._phase_label.setText(snapshot.format_phase_display())
             self._progress_ring.set_progress(snapshot.progress_weighted)
@@ -519,7 +538,26 @@ class LiveScanPanel(QFrame):
                 self._warning_layout.addWidget(warning_label)
         else:
             self._warning_placeholder.show()
-            self._warning_placeholder.setText("No warnings")
+            self._warning_placeholder.setText(
+                f"{snapshot.warnings_count} warning(s)" if snapshot.warnings_count > 0 else "No warnings"
+            )
+        
+        # Result status: Complete | Partial | Cancelled (Phase 13) + Phase 1: errors when > 0
+        status_parts = []
+        if snapshot.phase == ScanPhase.COMPLETED:
+            status_parts.append("Results: Complete")
+        elif snapshot.phase == ScanPhase.CANCELLED:
+            status_parts.append("Results: Cancelled")
+        elif snapshot.phase == ScanPhase.FAILED:
+            status_parts.append("Results: Failed")
+        elif not snapshot.is_active and snapshot.files_processed > 0:
+            status_parts.append("Results: Partial")
+        err_count = getattr(snapshot, "errors_count", 0) or 0
+        if err_count > 0:
+            status_parts.append(f"{err_count} error(s)")
+        self._result_status_label.setText("  ·  ".join(status_parts) if status_parts else "")
+        if not status_parts:
+            self._result_status_label.setText("")
 
     # ------------------------------------------------------------------------
     # Legacy API (for backward compatibility)
@@ -594,6 +632,8 @@ class LiveScanPanel(QFrame):
         self._current_file_label.setText("—")
         self._groups_label.setText("0")
         self._dupes_label.setText("0")
+        if hasattr(self, "_result_status_label") and self._result_status_label:
+            self._result_status_label.setText("")
         
         self._clear_warnings()
         self._warning_placeholder.setText("No warnings")

@@ -1,6 +1,7 @@
 # cerebro/workers/fast_scan_worker.py
 from __future__ import annotations
 
+import os
 import sys
 import time
 import traceback
@@ -87,6 +88,7 @@ class FastScanWorker(QThread):
     def __init__(self, config: Dict[str, Any], parent: Optional[QObject] = None):
         super().__init__(parent)
         self._cfg = FastScanConfig.from_dict(config)
+        self._scan_id = str(config.get("scan_id", ""))
         self._pipeline: Optional[ScanEngine] = None
         self._cancelled = False
 
@@ -192,10 +194,40 @@ class FastScanWorker(QThread):
             payload = dict(result or {})
             payload.setdefault("scan_root", root)
             payload.setdefault("scan_name", self._cfg.scan_name or f"Scan of {root}")
-            payload.setdefault("groups", payload.get("groups") or [])
+            groups_list = payload.get("groups")
+            if not isinstance(groups_list, list):
+                groups_list = []
+            payload.setdefault("groups", groups_list)
             payload.setdefault("file_count", int(payload.get("file_count", 0) or 0))
             payload.setdefault("total_size", int(payload.get("total_size", 0) or 0))
             payload.setdefault("scan_duration", float(payload.get("scan_duration", 0.0) or 0.0))
+
+            # Persist to scan result store; emit light payload (no groups) when store used (M5)
+            # Set CEREBRO_USE_SCAN_RESULT_STORE=0 to disable store and emit full payload (design §7)
+            use_store = os.environ.get("CEREBRO_USE_SCAN_RESULT_STORE", "1").strip().lower() not in ("0", "false", "no")
+            if use_store and self._scan_id and groups_list:
+                try:
+                    from cerebro.scan_result_store import get_scan_result_store
+                    store = get_scan_result_store()
+                    stats = payload.get("stats") or {}
+                    store.write_scan_result(
+                        self._scan_id,
+                        root,
+                        groups_list,
+                        scan_name=payload.get("scan_name", ""),
+                        status="completed",
+                        files_scanned=int(stats.get("files_scanned", payload.get("file_count", 0)) or 0),
+                        total_size=int(payload.get("total_size", 0) or 0),
+                        scan_duration_seconds=float(payload.get("scan_duration", 0) or 0),
+                        config_json={"scanner_tier": getattr(self._cfg, "scanner_tier", "turbo")},
+                    )
+                    payload["result_store_path"] = str(store.db_path)
+                    payload["groups_count"] = len(groups_list)
+                    del payload["groups"]
+                except Exception:
+                    payload["result_store_path"] = ""
+            else:
+                payload["result_store_path"] = ""
 
             self.finished.emit(payload)
 
