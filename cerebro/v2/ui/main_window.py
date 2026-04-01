@@ -469,11 +469,18 @@ github.com/Perps12-oss/dedup"""
 
     def _on_file_selected_in_results(self, file_data: DuplicateFile) -> None:
         """Wire result-panel single-click to preview panel (A/B side-by-side)."""
+        meta = file_data.metadata or {}
         preview_dict = {
             "path": str(file_data.path),
             "size": file_data.size,
             "modified": file_data.modified,
             "extension": file_data.extension,
+            # Image-specific (populated by ImageDedupEngine; 0 for non-images)
+            "width": meta.get("width", 0),
+            "height": meta.get("height", 0),
+            "format": meta.get("format", ""),
+            "megapixels": meta.get("megapixels", 0.0),
+            "similarity": file_data.similarity,
         }
         if self._last_preview_file is None:
             self._preview_panel.load_file_a(preview_dict)

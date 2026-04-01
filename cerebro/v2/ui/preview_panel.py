@@ -158,6 +158,17 @@ class PreviewSidePanel(CTkFrame):
             padx=Spacing.SM, pady=Spacing.XS, sticky="w"
         )
 
+        # Similarity label (for image mode)
+        self._metadata_labels["similarity"] = CTkLabel(
+            parent,
+            text="",
+            font=Typography.FONT_XS,
+            text_color=Colors.ACCENT.hex,
+        )
+        self._metadata_labels["similarity"].grid(
+            row=0, column=3, padx=Spacing.SM, pady=Spacing.XS, sticky="w"
+        )
+
         # Path label (truncated)
         self._metadata_labels["path"] = CTkLabel(
             parent,
@@ -204,34 +215,60 @@ class PreviewSidePanel(CTkFrame):
         self._canvas.reset_view()
 
         # Reset metadata labels
-        self._metadata_labels["resolution"].configure(text="-- x -- px")
+        self._metadata_labels["resolution"].configure(text="-- × --")
         self._metadata_labels["size"].configure(text="0 B")
-        self._metadata_labels["format"].configure(text="--")
+        self._metadata_labels["format"].configure(text="--", text_color=Colors.TEXT_MUTED.hex)
         self._metadata_labels["date"].configure(text="----/--/--")
         self._metadata_labels["path"].configure(text="")
+        if "similarity" in self._metadata_labels:
+            self._metadata_labels["similarity"].configure(text="")
 
         # Disable keep button
         self._keep_btn.configure(state="disabled")
 
     def _update_metadata(self, file_data: Dict[str, Any], path: Path) -> None:
         """Update metadata labels from file data."""
-        # Resolution (if available)
-        width = file_data.get("width")
-        height = file_data.get("height")
+        # Resolution + megapixels badge
+        width = file_data.get("width") or 0
+        height = file_data.get("height") or 0
         if width and height:
+            mp = file_data.get("megapixels") or round(width * height / 1_000_000, 1)
+            mp_str = f" · {mp:.1f} MP" if mp >= 0.1 else ""
             self._metadata_labels["resolution"].configure(
-                text=f"{width} × {height} px"
+                text=f"{width:,} × {height:,}{mp_str}"
             )
         else:
-            self._metadata_labels["resolution"].configure(text="-- x -- px")
+            self._metadata_labels["resolution"].configure(text="-- × --")
 
         # Size
         size = file_data.get("size", 0)
         self._metadata_labels["size"].configure(text=self._format_bytes(size))
 
-        # Format (extension)
-        ext = path.suffix.upper().lstrip('.')
-        self._metadata_labels["format"].configure(text=ext if ext else "--")
+        # Format badge — prefer engine-provided format string, fall back to extension
+        fmt = (file_data.get("format") or "").strip().upper()
+        if not fmt:
+            fmt = path.suffix.upper().lstrip(".")
+        # Color-code common formats
+        fmt_colors: Dict[str, str] = {
+            "JPEG": "#e8825a", "JPG": "#e8825a",
+            "PNG": "#5a9ee8", "GIF": "#a55ae8",
+            "WEBP": "#5ae8a4", "HEIC": "#e8c25a", "HEIF": "#e8c25a",
+            "RAW": "#c8c8c8", "CR2": "#c8c8c8", "NEF": "#c8c8c8",
+            "TIFF": "#8ae85a", "TIF": "#8ae85a", "BMP": "#e85a5a",
+        }
+        color = fmt_colors.get(fmt, Colors.TEXT_MUTED.hex)
+        self._metadata_labels["format"].configure(
+            text=fmt if fmt else "--",
+            text_color=color,
+        )
+
+        # Similarity score (for image dedup mode)
+        sim = file_data.get("similarity")
+        if sim is not None:
+            pct = int(round(sim * 100))
+            sim_label = self._metadata_labels.get("similarity")
+            if sim_label:
+                sim_label.configure(text=f"{pct}% similar")
 
         # Modified date
         modified = file_data.get("modified", 0)
@@ -321,6 +358,10 @@ class PreviewPanel(CTkFrame):
         self._side_b_panel: Optional[PreviewSidePanel] = None
         self._content_frame: Optional[CTkFrame] = None
         self._empty_label: Optional[CTkLabel] = None
+        self._diff_frame: Optional[CTkFrame] = None
+        self._diff_canvas: Optional[ZoomCanvas] = None
+        self._diff_label: Optional[CTkLabel] = None
+        self._diff_image_ref = None  # keep Tk PhotoImage alive
 
         # Callbacks
         self._on_keep_a: Optional[Callable[[], None]] = None
@@ -344,6 +385,9 @@ class PreviewPanel(CTkFrame):
 
         # Side-by-side panels
         self._build_side_panels()
+
+        # Diff strip (hidden by default)
+        self._build_diff_strip()
 
         # Empty state label
         self._empty_label = CTkLabel(
@@ -385,10 +429,10 @@ class PreviewPanel(CTkFrame):
             text="Diff Overlay",
             font=Typography.FONT_SM,
             onvalue=True,
-            offvalue=False
+            offvalue=False,
+            command=self._on_diff_switch_changed,
         )
         self._diff_switch.pack(side="right", padx=Spacing.SM)
-        # TODO: Configure command for diff switch
 
         # Sync button
         self._sync_btn = CTkButton(
@@ -438,6 +482,73 @@ class PreviewPanel(CTkFrame):
 
         # Sync canvases
         self._side_a_panel.get_canvas().sync_with(self._side_b_panel.get_canvas())
+
+    def _build_diff_strip(self) -> None:
+        """Build the diff overlay strip (hidden until toggled on)."""
+        self._diff_frame = CTkFrame(
+            self,
+            height=120,
+            fg_color=Colors.BG_TERTIARY.hex,
+        )
+        # Not packed initially — shown only when diff is enabled
+
+        CTkLabel(
+            self._diff_frame,
+            text="Difference",
+            font=Typography.FONT_XS,
+            text_color=Colors.TEXT_SECONDARY.hex,
+        ).pack(anchor="w", padx=Spacing.SM)
+
+        self._diff_canvas = ZoomCanvas(
+            self._diff_frame,
+            bg_color=Colors.BG_PRIMARY.hex,
+        )
+        self._diff_canvas.pack(fill="both", expand=True, padx=Spacing.XS, pady=Spacing.XS)
+
+        self._diff_label = CTkLabel(
+            self._diff_frame,
+            text="Load two images to see the diff",
+            font=Typography.FONT_XS,
+            text_color=Colors.TEXT_MUTED.hex,
+        )
+
+    def _on_diff_switch_changed(self) -> None:
+        """Handle diff switch toggle."""
+        enabled = bool(getattr(self._diff_switch, "get", lambda: False)())
+        self.toggle_diff_overlay(enabled)
+
+    def _compute_diff_image(self):
+        """
+        Compute pixel-level difference between file A and file B.
+
+        Returns a PIL Image (amplified diff), or None on failure.
+        """
+        try:
+            from PIL import Image, ImageChops, ImageEnhance  # type: ignore
+        except ImportError:
+            return None
+
+        a_path = (self._file_a or {}).get("path", "")
+        b_path = (self._file_b or {}).get("path", "")
+        if not a_path or not b_path:
+            return None
+
+        try:
+            img_a = Image.open(a_path).convert("RGB")
+            img_b = Image.open(b_path).convert("RGB")
+        except Exception:
+            return None
+
+        # Resize B to match A for a clean pixel diff
+        if img_a.size != img_b.size:
+            img_b = img_b.resize(img_a.size, Image.LANCZOS)
+
+        diff = ImageChops.difference(img_a, img_b)
+        # Amplify differences so subtle changes are visible
+        diff = ImageEnhance.Brightness(diff).enhance(8.0)
+        img_a.close()
+        img_b.close()
+        return diff
 
     def _toggle_collapse(self) -> None:
         """Toggle panel collapse state."""
@@ -508,6 +619,8 @@ class PreviewPanel(CTkFrame):
             self._side_a_panel._clear_display()
 
         self._update_content_visibility()
+        if self._diff_enabled:
+            self.toggle_diff_overlay(True)
 
     def load_file_b(self, file_data: Dict[str, Any]) -> None:
         """
@@ -525,6 +638,8 @@ class PreviewPanel(CTkFrame):
             self._side_b_panel._clear_display()
 
         self._update_content_visibility()
+        if self._diff_enabled:
+            self.toggle_diff_overlay(True)
 
     def load_single(self, file_data: Dict[str, Any]) -> None:
         """
@@ -598,13 +713,44 @@ class PreviewPanel(CTkFrame):
 
     def toggle_diff_overlay(self, enabled: bool) -> None:
         """
-        Toggle diff overlay mode.
+        Toggle diff overlay strip.
 
-        Args:
-            enabled: Whether to show diff overlay.
+        When enabled, computes a pixel-level difference between file A and B
+        and displays an amplified diff image in the strip below the panels.
         """
         self._diff_enabled = enabled
-        # TODO: Implement diff overlay visualization
+
+        if not enabled:
+            if self._diff_frame and self._diff_frame.winfo_ismapped():
+                self._diff_frame.pack_forget()
+            return
+
+        # Show the diff strip
+        if self._diff_frame and not self._diff_frame.winfo_ismapped():
+            self._diff_frame.pack(fill="x", padx=Spacing.XS, pady=(0, Spacing.XS))
+
+        diff_img = self._compute_diff_image()
+        if diff_img is None:
+            if self._diff_label and not self._diff_label.winfo_ismapped():
+                self._diff_label.pack(expand=True)
+            return
+
+        if self._diff_label and self._diff_label.winfo_ismapped():
+            self._diff_label.pack_forget()
+
+        # Load diff image into diff canvas
+        try:
+            import tempfile, os
+            from PIL import Image  # type: ignore
+
+            tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+            tmp.close()
+            diff_img.save(tmp.name)
+            diff_img.close()
+            self._diff_canvas.load_image(tmp.name, fit=True)
+            os.unlink(tmp.name)
+        except Exception:
+            pass
 
     def set_collapsed(self, collapsed: bool) -> None:
         """
