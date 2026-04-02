@@ -57,7 +57,7 @@ Current phase: Phase 3 - Image Dedup Engine + Preview
 | Phase 0 | (included in Phase 1) | ✅ Complete |
 | Phase 1 | `PHASE_1_PROGRESS.md` | ✅ Complete |
 | Phase 2 | `PHASE_2_PROGRESS.md` | ✅ Complete |
-| Phase 3 | `PHASE_3_PROGRESS.md` | 🔄 Next |
+| Phase 3 | `PHASE_3_PROGRESS.md` | 🔄 **In Progress** |
 | Phase 4 | `PHASE_4_PROGRESS.md` | Pending |
 | Phase 5 | `PHASE_5_PROGRESS.md` | Pending |
 | Phase 6 | `PHASE_6_PROGRESS.md` | Pending |
