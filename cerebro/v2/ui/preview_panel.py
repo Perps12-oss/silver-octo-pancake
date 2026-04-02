@@ -24,8 +24,9 @@ except ImportError:
     CTkSwitch = tk.Checkbutton
 
 from cerebro.v2.core.design_tokens import (
-    Colors, Spacing, Typography, Dimensions
+    Spacing, Typography, Dimensions
 )
+from cerebro.v2.core.theme_bridge_v2 import theme_color, subscribe_to_theme
 from cerebro.v2.ui.widgets.zoom_canvas import ZoomCanvas
 
 
@@ -56,11 +57,28 @@ class PreviewSidePanel(CTkFrame):
 
         # Build UI
         self._build_ui()
+        subscribe_to_theme(self, self._apply_theme)
+
+    def _apply_theme(self) -> None:
+        """Reconfigure all widget colors when theme changes."""
+        self.configure(fg_color=theme_color("base.backgroundTertiary"))
+        if self._keep_btn:
+            self._keep_btn.configure(
+                fg_color=theme_color("feedback.success"),
+                hover_color=theme_color("feedback.success"),
+            )
+        text_secondary = theme_color("base.foregroundSecondary")
+        text_muted = theme_color("base.foregroundMuted")
+        for key, label in self._metadata_labels.items():
+            if key in ("resolution", "size"):
+                label.configure(text_color=text_secondary)
+            else:
+                label.configure(text_color=text_muted)
 
     def _build_ui(self) -> None:
         """Build preview side panel UI."""
         self.configure(
-            fg_color=Colors.BG_TERTIARY.hex
+            fg_color=theme_color("base.backgroundTertiary")
         )
 
         # Title label
@@ -69,7 +87,7 @@ class PreviewSidePanel(CTkFrame):
                 self,
                 text=self._title,
                 font=Typography.FONT_SM,
-                text_color=Colors.TEXT_SECONDARY.hex
+                text_color=theme_color("base.foregroundSecondary")
             ).pack(anchor="w", padx=Spacing.SM, pady=(Spacing.SM, 0))
 
         # Canvas frame
@@ -79,7 +97,7 @@ class PreviewSidePanel(CTkFrame):
         # ZoomCanvas
         self._canvas = ZoomCanvas(
             canvas_frame,
-            bg_color=Colors.BG_SECONDARY.hex
+            bg_color=theme_color("preview.background")
         )
         self._canvas.pack(fill="both", expand=True)
 
@@ -87,7 +105,7 @@ class PreviewSidePanel(CTkFrame):
         metadata_frame = CTkFrame(
             self,
             height=80,
-            fg_color=Colors.BG_QUATERNARY.hex
+            fg_color=theme_color("base.backgroundElevated")
         )
         metadata_frame.pack(fill="x", padx=Spacing.XS, pady=Spacing.SM)
 
@@ -100,8 +118,8 @@ class PreviewSidePanel(CTkFrame):
             text="📌 Keep This",
             height=28,
             font=Typography.FONT_SM,
-            fg_color=Colors.SUCCESS.hex,
-            hover_color=Colors.SUCCESS_HOVER.hex,
+            fg_color=theme_color("feedback.success"),
+            hover_color=theme_color("feedback.success"),
             corner_radius=Spacing.BORDER_RADIUS_SM
         )
         self._keep_btn.pack(fill="x", padx=Spacing.SM, pady=(0, Spacing.SM))
@@ -117,7 +135,7 @@ class PreviewSidePanel(CTkFrame):
             parent,
             text="-- x -- px",
             font=Typography.FONT_SM,
-            text_color=Colors.TEXT_SECONDARY.hex
+            text_color=theme_color("base.foregroundSecondary")
         )
         self._metadata_labels["resolution"].grid(
             row=0, column=0, padx=Spacing.SM, pady=Spacing.XS, sticky="w"
@@ -128,7 +146,7 @@ class PreviewSidePanel(CTkFrame):
             parent,
             text="0 B",
             font=Typography.FONT_SM,
-            text_color=Colors.TEXT_SECONDARY.hex
+            text_color=theme_color("base.foregroundSecondary")
         )
         self._metadata_labels["size"].grid(
             row=0, column=1, padx=Spacing.SM, pady=Spacing.XS, sticky="w"
@@ -139,7 +157,7 @@ class PreviewSidePanel(CTkFrame):
             parent,
             text="--",
             font=Typography.FONT_XS,
-            text_color=Colors.TEXT_MUTED.hex,
+            text_color=theme_color("base.foregroundMuted"),
             width=40
         )
         self._metadata_labels["format"].grid(
@@ -151,7 +169,7 @@ class PreviewSidePanel(CTkFrame):
             parent,
             text="----/--/--",
             font=Typography.FONT_XS,
-            text_color=Colors.TEXT_MUTED.hex
+            text_color=theme_color("base.foregroundMuted")
         )
         self._metadata_labels["date"].grid(
             row=1, column=0, columnspan=2,
@@ -163,7 +181,7 @@ class PreviewSidePanel(CTkFrame):
             parent,
             text="",
             font=Typography.FONT_XS,
-            text_color=Colors.TEXT_MUTED.hex,
+            text_color=theme_color("base.foregroundMuted"),
             anchor="w"
         )
         self._metadata_labels["path"].grid(
@@ -328,11 +346,30 @@ class PreviewPanel(CTkFrame):
 
         # Build UI
         self._build_ui()
+        subscribe_to_theme(self, self._apply_theme)
+
+    def _apply_theme(self) -> None:
+        """Reconfigure all widget colors when theme changes."""
+        self.configure(fg_color=theme_color("preview.background"))
+        if self._header_frame:
+            self._header_frame.configure(fg_color=theme_color("base.backgroundTertiary"))
+        if self._collapse_btn:
+            self._collapse_btn.configure(
+                fg_color=theme_color("base.foregroundSecondary"),
+                hover_color=theme_color("base.foreground"),
+            )
+        if self._sync_btn:
+            self._sync_btn.configure(
+                fg_color=theme_color("base.backgroundElevated"),
+                hover_color=theme_color("base.background"),
+            )
+        if self._empty_label:
+            self._empty_label.configure(text_color=theme_color("base.foregroundMuted"))
 
     def _build_ui(self) -> None:
         """Build preview panel UI."""
         self.configure(
-            fg_color=Colors.BG_SECONDARY.hex
+            fg_color=theme_color("preview.background")
         )
 
         # Header frame
@@ -350,7 +387,7 @@ class PreviewPanel(CTkFrame):
             self._content_frame,
             text="Select a file to preview\nSelect two files for comparison",
             font=Typography.FONT_MD,
-            text_color=Colors.TEXT_MUTED.hex
+            text_color=theme_color("base.foregroundMuted")
         )
         self._empty_label.pack(expand=True)
 
@@ -363,7 +400,7 @@ class PreviewPanel(CTkFrame):
         self._header_frame = CTkFrame(
             self,
             height=32,
-            fg_color=Colors.BG_TERTIARY.hex
+            fg_color=theme_color("base.backgroundTertiary")
         )
         self._header_frame.pack(fill="x")
 
@@ -372,7 +409,7 @@ class PreviewPanel(CTkFrame):
             self._header_frame,
             text="Preview",
             font=Typography.FONT_MD,
-            text_color=Colors.TEXT_PRIMARY.hex
+            text_color=theme_color("base.foreground")
         ).pack(side="left", padx=Spacing.MD)
 
         # Spacer
@@ -397,8 +434,8 @@ class PreviewPanel(CTkFrame):
             width=60,
             height=28,
             font=Typography.FONT_SM,
-            fg_color=Colors.BG_QUATERNARY.hex,
-            hover_color=Colors.BG_PRIMARY.hex,
+            fg_color=theme_color("base.backgroundElevated"),
+            hover_color=theme_color("base.background"),
             corner_radius=Spacing.BORDER_RADIUS_SM
         )
         self._sync_btn.pack(side="right", padx=Spacing.SM)
@@ -411,8 +448,8 @@ class PreviewPanel(CTkFrame):
             width=32,
             height=28,
             font=Typography.FONT_MD,
-            fg_color=Colors.TEXT_SECONDARY.hex,
-            hover_color=Colors.TEXT_PRIMARY.hex,
+            fg_color=theme_color("base.foregroundSecondary"),
+            hover_color=theme_color("base.foreground"),
             corner_radius=0
         )
         self._collapse_btn.pack(side="right", padx=Spacing.SM)

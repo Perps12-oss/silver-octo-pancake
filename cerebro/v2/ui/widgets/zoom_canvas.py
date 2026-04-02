@@ -26,7 +26,7 @@ except ImportError:
     HAS_PIL = False
     Image = None
 
-from cerebro.v2.core.design_tokens import Colors, Spacing, Dimensions
+from cerebro.v2.core.design_tokens import Spacing, Dimensions
 
 
 class ViewState:

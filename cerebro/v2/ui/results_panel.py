@@ -21,9 +21,8 @@ except ImportError:
     CTkLabel = tk.Label
     CTkSegmentedButton = tk.Frame
 
-from cerebro.v2.core.design_tokens import (
-    Colors, Spacing, Typography, Dimensions
-)
+from cerebro.v2.core.design_tokens import Spacing, Typography, Dimensions
+from cerebro.v2.core.theme_bridge_v2 import theme_color, subscribe_to_theme
 from cerebro.v2.ui.widgets.check_treeview import CheckTreeview
 
 
@@ -139,6 +138,7 @@ class ResultsPanel(CTkFrame):
 
     def __init__(self, master=None, **kwargs):
         super().__init__(master, **kwargs)
+        subscribe_to_theme(self, self._apply_theme)
 
         # State
         self._current_filter: str = FilterType.ALL
@@ -166,7 +166,7 @@ class ResultsPanel(CTkFrame):
     def _build_ui(self) -> None:
         """Build results panel UI."""
         self.configure(
-            fg_color=Colors.BG_SECONDARY.hex
+            fg_color=theme_color("results.background")
         )
 
         # Filter tabs bar
@@ -201,8 +201,18 @@ class ResultsPanel(CTkFrame):
             self,
             text="No results to display.\nAdd folders and click 'Start Search' to begin.",
             font=Typography.FONT_MD,
-            text_color=Colors.TEXT_MUTED.hex
+            text_color=theme_color("base.foregroundMuted")
         )
+
+    def _apply_theme(self) -> None:
+        """Reconfigure all widget colors when theme changes."""
+        self.configure(fg_color=theme_color("results.background"))
+        if self._status_frame:
+            self._status_frame.configure(fg_color=theme_color("base.backgroundTertiary"))
+        if self._results_count_label:
+            self._results_count_label.configure(text_color=theme_color("results.foreground"))
+        if self._empty_label:
+            self._empty_label.configure(text_color=theme_color("base.foregroundMuted"))
 
     def _build_filter_tabs(self) -> None:
         """Build filter tabs bar."""
@@ -231,7 +241,7 @@ class ResultsPanel(CTkFrame):
         self._status_frame = CTkFrame(
             self,
             height=28,
-            fg_color=Colors.BG_TERTIARY.hex
+            fg_color=theme_color("base.backgroundTertiary")
         )
         self._status_frame.pack(fill="x", padx=Spacing.XS, pady=(0, Spacing.XS))
 
@@ -239,7 +249,7 @@ class ResultsPanel(CTkFrame):
             self._status_frame,
             text="0 groups, 0 files",
             font=Typography.FONT_SM,
-            text_color=Colors.TEXT_SECONDARY.hex
+            text_color=theme_color("results.foreground")
         )
         self._results_count_label.pack(side="left", padx=Spacing.MD)
 

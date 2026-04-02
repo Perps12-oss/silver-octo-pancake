@@ -35,8 +35,9 @@ except ImportError:
     CTkEntry = tk.Entry
 
 from cerebro.v2.core.design_tokens import (
-    Colors, Spacing, Typography, Dimensions
+    Spacing, Typography, Dimensions
 )
+from cerebro.v2.core.theme_bridge_v2 import theme_color, subscribe_to_theme
 
 
 class Settings:
@@ -174,6 +175,7 @@ class SettingsDialog(CTkToplevel):
 
     def __init__(self, parent, settings: Optional[Settings] = None, **kwargs):
         super().__init__(parent, **kwargs)
+        subscribe_to_theme(self, self._apply_theme)
 
         self._settings = settings or Settings()
         self._parent = parent
@@ -233,7 +235,7 @@ class SettingsDialog(CTkToplevel):
             CTkLabel(
                 main_frame,
                 text="Tabview not available in fallback mode",
-                text_color=Colors.WARNING.hex
+                text_color=theme_color("feedback.warning")
             ).pack(expand=True)
 
         # Button frame
@@ -247,8 +249,8 @@ class SettingsDialog(CTkToplevel):
             width=100,
             height=Dimensions.BUTTON_HEIGHT_MD,
             font=Typography.FONT_MD,
-            fg_color=Colors.SUCCESS.hex,
-            hover_color=Colors.SUCCESS_HOVER.hex
+            fg_color=theme_color("feedback.success"),
+            hover_color=theme_color("feedback.success")
         )
         self._save_btn.pack(side="right", padx=Spacing.MD, pady=(0, 0))
         self._save_btn.configure(command=self._on_save_clicked)
@@ -260,8 +262,8 @@ class SettingsDialog(CTkToplevel):
             width=100,
             height=Dimensions.BUTTON_HEIGHT_MD,
             font=Typography.FONT_MD,
-            fg_color=Colors.BG_TERTIARY.hex,
-            hover_color=Colors.BG_QUATERNARY.hex
+            fg_color=theme_color("base.backgroundTertiary"),
+            hover_color=theme_color("base.backgroundElevated")
         )
         self._cancel_btn.pack(side="right", padx=Spacing.SM, pady=(0, 0))
         self._cancel_btn.configure(command=self._on_cancel_clicked)
@@ -275,7 +277,7 @@ class SettingsDialog(CTkToplevel):
             tab,
             text="Default Scan Mode",
             font=Typography.FONT_SM,
-            text_color=Colors.TEXT_PRIMARY.hex,
+            text_color=theme_color("base.foreground"),
             anchor="w"
         ).pack(fill="x", padx=Spacing.SM, pady=(Spacing.SM, 0))
 
@@ -284,9 +286,9 @@ class SettingsDialog(CTkToplevel):
             values=["Files", "Photos", "Videos", "Music", "Empty Folders", "Large Files"],
             default_value="Files",
             font=Typography.FONT_SM,
-            fg_color=Colors.TEXT_PRIMARY.hex,
-            button_color=Colors.BG_QUATERNARY.hex,
-            dropdown_fg_color=Colors.TEXT_PRIMARY.hex
+            fg_color=theme_color("base.foreground"),
+            button_color=theme_color("base.backgroundElevated"),
+            dropdown_fg_color=theme_color("base.foreground")
         )
         mode_menu.pack(fill="x", padx=Spacing.SM, pady=(Spacing.XS, Spacing.MD))
 
@@ -326,7 +328,7 @@ class SettingsDialog(CTkToplevel):
             tab,
             text="Theme",
             font=Typography.FONT_SM,
-            text_color=Colors.TEXT_PRIMARY.hex,
+            text_color=theme_color("base.foreground"),
             anchor="w"
         ).pack(fill="x", padx=Spacing.SM, pady=(Spacing.SM, 0))
 
@@ -335,9 +337,9 @@ class SettingsDialog(CTkToplevel):
             values=["Dark Navy + Cyan", "Dark Gray", "Light Mode"],
             default_value="Dark Navy + Cyan",
             font=Typography.FONT_SM,
-            fg_color=Colors.TEXT_PRIMARY.hex,
-            button_color=Colors.BG_QUATERNARY.hex,
-            dropdown_fg_color=Colors.TEXT_PRIMARY.hex
+            fg_color=theme_color("base.foreground"),
+            button_color=theme_color("base.backgroundElevated"),
+            dropdown_fg_color=theme_color("base.foreground")
         )
         theme_menu.pack(fill="x", padx=Spacing.SM, pady=(Spacing.XS, Spacing.MD))
 
@@ -346,7 +348,7 @@ class SettingsDialog(CTkToplevel):
             tab,
             text="Font Size",
             font=Typography.FONT_SM,
-            text_color=Colors.TEXT_PRIMARY.hex,
+            text_color=theme_color("base.foreground"),
             anchor="w"
         ).pack(fill="x", padx=Spacing.SM, pady=(0, Spacing.SM))
 
@@ -369,7 +371,7 @@ class SettingsDialog(CTkToplevel):
             tab,
             text="Max Threads (0 = auto)",
             font=Typography.FONT_SM,
-            text_color=Colors.TEXT_PRIMARY.hex,
+            text_color=theme_color("base.foreground"),
             anchor="w"
         ).pack(fill="x", padx=Spacing.SM, pady=(Spacing.SM, 0))
 
@@ -403,7 +405,7 @@ class SettingsDialog(CTkToplevel):
             cache_frame,
             text="Cache Size (MB):",
             font=Typography.FONT_SM,
-            text_color=Colors.TEXT_PRIMARY.hex
+            text_color=theme_color("base.foreground")
         )
         size_label.pack(side="left", padx=Spacing.LG)
 
@@ -411,7 +413,7 @@ class SettingsDialog(CTkToplevel):
             cache_frame,
             text=str(self._settings.performance.get("hash_cache_max_mb", 500)),
             font=Typography.FONT_SM,
-            text_color=Colors.TEXT_SECONDARY.hex
+            text_color=theme_color("base.foregroundSecondary")
         ).pack(side="left", padx=Spacing.XS)
 
     def _build_deletion_tab(self) -> None:
@@ -423,7 +425,7 @@ class SettingsDialog(CTkToplevel):
             tab,
             text="Deletion Method",
             font=Typography.FONT_SM,
-            text_color=Colors.TEXT_PRIMARY.hex,
+            text_color=theme_color("base.foreground"),
             anchor="w"
         ).pack(fill="x", padx=Spacing.SM, pady=(Spacing.SM, 0))
 
@@ -432,9 +434,9 @@ class SettingsDialog(CTkToplevel):
             values=["Recycle Bin", "Delete Permanently", "Move to Folder"],
             default_value="Recycle Bin",
             font=Typography.FONT_SM,
-            fg_color=Colors.TEXT_PRIMARY.hex,
-            button_color=Colors.BG_QUATERNARY.hex,
-            dropdown_fg_color=Colors.TEXT_PRIMARY.hex
+            fg_color=theme_color("base.foreground"),
+            button_color=theme_color("base.backgroundElevated"),
+            dropdown_fg_color=theme_color("base.foreground")
         )
         method_menu.pack(fill="x", padx=Spacing.SM, pady=(Spacing.XS, Spacing.MD))
 
@@ -443,7 +445,7 @@ class SettingsDialog(CTkToplevel):
             tab,
             text="Auto-Mark Rule",
             font=Typography.FONT_SM,
-            text_color=Colors.TEXT_PRIMARY.hex,
+            text_color=theme_color("base.foreground"),
             anchor="w"
         ).pack(fill="x", padx=Spacing.SM, pady=(0, Spacing.SM))
 
@@ -452,9 +454,9 @@ class SettingsDialog(CTkToplevel):
             values=["Keep Largest", "Keep Smallest", "Keep Newest", "Keep Oldest", "Keep First"],
             default_value="Keep Largest",
             font=Typography.FONT_SM,
-            fg_color=Colors.TEXT_PRIMARY.hex,
-            button_color=Colors.BG_QUATERNARY.hex,
-            dropdown_fg_color=Colors.TEXT_PRIMARY.hex
+            fg_color=theme_color("base.foreground"),
+            button_color=theme_color("base.backgroundElevated"),
+            dropdown_fg_color=theme_color("base.foreground")
         )
         rule_menu.pack(fill="x", padx=Spacing.SM, pady=(Spacing.XS, Spacing.MD))
 
@@ -464,7 +466,7 @@ class SettingsDialog(CTkToplevel):
             text="⚠ Deletion always uses Recycle Bin when available.\n"
                 "Files in protected folders are never auto-marked for deletion.",
             font=Typography.FONT_XS,
-            text_color=Colors.WARNING.hex,
+            text_color=theme_color("feedback.warning"),
             wraplength=500
         ).pack(fill="x", padx=Spacing.SM, pady=Spacing.MD)
 
@@ -477,14 +479,14 @@ class SettingsDialog(CTkToplevel):
             tab,
             text="Cerebro v2",
             font=Typography.FONT_XL,
-            text_color=Colors.ACCENT.hex
+            text_color=theme_color("base.accent")
         ).pack(pady=Spacing.LG)
 
         CTkLabel(
             tab,
             text="Ashisoft Edition",
             font=Typography.FONT_SM,
-            text_color=Colors.TEXT_SECONDARY.hex
+            text_color=theme_color("base.foregroundSecondary")
         ).pack()
 
         # Version
@@ -492,7 +494,7 @@ class SettingsDialog(CTkToplevel):
             tab,
             text="Version: 2.0.0",
             font=Typography.FONT_SM,
-            text_color=Colors.TEXT_SECONDARY.hex
+            text_color=theme_color("base.foregroundSecondary")
         ).pack(pady=(Spacing.MD, 0))
 
         # Description
@@ -502,7 +504,7 @@ class SettingsDialog(CTkToplevel):
                 "Supports files, images, videos, music, empty folders,\n"
                 "and large files detection.",
             font=Typography.FONT_SM,
-            text_color=Colors.TEXT_SECONDARY.hex,
+            text_color=theme_color("base.foregroundSecondary"),
             justify="center"
         ).pack(pady=Spacing.MD)
 
@@ -511,7 +513,7 @@ class SettingsDialog(CTkToplevel):
             tab,
             text="Repository: github.com/Perps12-oss/dedup",
             font=Typography.FONT_SM,
-            text_color=Colors.ACCENT.hex
+            text_color=theme_color("base.accent")
         ).pack(pady=Spacing.MD)
 
         # Credits
@@ -519,8 +521,25 @@ class SettingsDialog(CTkToplevel):
             tab,
             text="Built with CustomTkinter + ttk",
             font=Typography.FONT_XS,
-            text_color=Colors.TEXT_MUTED.hex
+            text_color=theme_color("base.foregroundMuted")
         ).pack(pady=Spacing.LG)
+
+    # ===================
+    # THEME
+    # ===================
+
+    def _apply_theme(self) -> None:
+        """Re-apply theme colors to tracked widgets (Save/Cancel buttons)."""
+        if self._save_btn:
+            self._save_btn.configure(
+                fg_color=theme_color("feedback.success"),
+                hover_color=theme_color("feedback.success"),
+            )
+        if self._cancel_btn:
+            self._cancel_btn.configure(
+                fg_color=theme_color("base.backgroundTertiary"),
+                hover_color=theme_color("base.backgroundElevated"),
+            )
 
     # ===================
     # EVENT HANDLERS

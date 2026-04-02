@@ -32,9 +32,8 @@ except ImportError:
     CTkSlider = tk.Scale
     CTkCheckBox = tk.Checkbutton
 
-from cerebro.v2.core.design_tokens import (
-    Colors, Spacing, Typography, Dimensions
-)
+from cerebro.v2.core.design_tokens import Spacing, Typography, Dimensions
+from cerebro.v2.core.theme_bridge_v2 import theme_color, subscribe_to_theme
 
 
 class FolderEntry:
@@ -61,14 +60,17 @@ class CollapsibleSection(CTkFrame):
         master=None,
         title: str = "",
         count: int = 0,
-        accent_color: str = Colors.TEXT_PRIMARY.hex,
+        accent_color: Optional[str] = None,
         **kwargs
     ):
         super().__init__(master, **kwargs)
         self._title = title
         self._count = count
-        self._accent_color = accent_color
+        self._custom_accent = accent_color
+        self._accent_color = accent_color or theme_color("base.foreground")
         self._expanded = True
+
+        subscribe_to_theme(self, self._apply_theme)
 
         # Widgets
         self._header_frame: Optional[CTkFrame] = None
@@ -85,7 +87,7 @@ class CollapsibleSection(CTkFrame):
         self._header_frame = CTkFrame(
             self,
             height=32,
-            fg_color=self._accent_color if self._accent_color != Colors.TEXT_PRIMARY.hex else Colors.BG_TERTIARY.hex
+            fg_color=self._accent_color if self._custom_accent else theme_color("base.backgroundTertiary")
         )
         self._header_frame.pack(fill="x")
 
@@ -103,7 +105,7 @@ class CollapsibleSection(CTkFrame):
             self._header_frame,
             text=f"({self._count})",
             font=Typography.FONT_SM,
-            text_color=Colors.TEXT_SECONDARY.hex
+            text_color=theme_color("base.foregroundSecondary")
         )
         self._count_label.pack(side="left", padx=Spacing.XS)
 
@@ -119,7 +121,7 @@ class CollapsibleSection(CTkFrame):
             height=28,
             font=Typography.FONT_SM,
             fg_color="transparent",
-            hover_color=Colors.BG_QUATERNARY.hex,
+            hover_color=theme_color("base.backgroundElevated"),
             border_width=0,
             corner_radius=0
         )
@@ -129,9 +131,39 @@ class CollapsibleSection(CTkFrame):
         # Content frame
         self._content_frame = CTkFrame(
             self,
-            fg_color=Colors.BG_TERTIARY.hex
+            fg_color=theme_color("base.backgroundTertiary")
         )
         self._content_frame.pack(fill="both", expand=True, padx=Spacing.XS)
+
+    def _apply_theme(self) -> None:
+        """Apply theme colors to all widgets."""
+        if self._custom_accent:
+            self._accent_color = self._custom_accent
+        else:
+            self._accent_color = theme_color("base.foreground")
+
+        try:
+            self._header_frame.configure(
+                fg_color=self._accent_color if self._custom_accent else theme_color("base.backgroundTertiary")
+            )
+        except Exception:
+            pass
+        try:
+            self._title_label.configure(text_color=self._accent_color)
+        except Exception:
+            pass
+        try:
+            self._count_label.configure(text_color=theme_color("base.foregroundSecondary"))
+        except Exception:
+            pass
+        try:
+            self._toggle_btn.configure(hover_color=theme_color("base.backgroundElevated"))
+        except Exception:
+            pass
+        try:
+            self._content_frame.configure(fg_color=theme_color("base.backgroundTertiary"))
+        except Exception:
+            pass
 
     def _toggle(self) -> None:
         """Toggle expand/collapse."""
@@ -190,6 +222,8 @@ class ScanFolderList(CTkScrollableFrame):
     def __init__(self, master=None, **kwargs):
         super().__init__(master, **kwargs)
 
+        subscribe_to_theme(self, self._apply_theme)
+
         # State
         self._folders: List[Path] = []
         self._folder_widgets: Dict[Path, Dict[str, tk.Widget]] = {}
@@ -206,10 +240,10 @@ class ScanFolderList(CTkScrollableFrame):
         # Configure scrollbar styling if available
         try:
             self.configure(
-                fg_color=Colors.BG_TERTIARY.hex,
-                scrollbar_fg_color=Colors.BG_SECONDARY.hex,
-                scrollbar_button_color=Colors.BG_TERTIARY.hex,
-                scrollbar_button_hover_color=Colors.ACCENT.hex
+                fg_color=theme_color("base.backgroundTertiary"),
+                scrollbar_fg_color=theme_color("panel.background"),
+                scrollbar_button_color=theme_color("base.backgroundTertiary"),
+                scrollbar_button_hover_color=theme_color("button.primary")
             )
         except AttributeError:
             pass
@@ -220,12 +254,49 @@ class ScanFolderList(CTkScrollableFrame):
             text="+ Add Folder",
             height=Dimensions.BUTTON_HEIGHT_MD,
             font=Typography.FONT_MD,
-            fg_color=Colors.ACCENT.hex,
-            hover_color=Colors.ACCENT_HOVER.hex,
+            fg_color=theme_color("button.primary"),
+            hover_color=theme_color("button.primaryHover"),
             corner_radius=Spacing.BORDER_RADIUS_SM
         )
         self._add_btn.pack(fill="x", padx=Spacing.SM, pady=(0, Spacing.SM))
         self._add_btn.configure(command=self._trigger_add_folder)
+
+    def _apply_theme(self) -> None:
+        """Apply theme colors to all widgets."""
+        try:
+            self.configure(
+                fg_color=theme_color("base.backgroundTertiary"),
+                scrollbar_fg_color=theme_color("panel.background"),
+                scrollbar_button_color=theme_color("base.backgroundTertiary"),
+                scrollbar_button_hover_color=theme_color("button.primary")
+            )
+        except (AttributeError, Exception):
+            pass
+        try:
+            self._add_btn.configure(
+                fg_color=theme_color("button.primary"),
+                hover_color=theme_color("button.primaryHover")
+            )
+        except Exception:
+            pass
+        # Update existing folder row widgets
+        for path, widgets in self._folder_widgets.items():
+            try:
+                widgets["frame"].configure(fg_color=theme_color("base.backgroundElevated"))
+            except Exception:
+                pass
+            try:
+                widgets["label"].configure(text_color=theme_color("base.foreground"))
+            except Exception:
+                pass
+            try:
+                widgets["button"].configure(
+                    fg_color=theme_color("base.foregroundSecondary"),
+                    hover_color=theme_color("feedback.danger"),
+                    text_color=theme_color("base.foreground")
+                )
+            except Exception:
+                pass
 
     def _trigger_add_folder(self) -> None:
         """Trigger add folder dialog."""
@@ -244,7 +315,7 @@ class ScanFolderList(CTkScrollableFrame):
         row_frame = CTkFrame(
             self,
             height=Dimensions.ROW_HEIGHT,
-            fg_color=Colors.BG_QUATERNARY.hex
+            fg_color=theme_color("base.backgroundElevated")
         )
         row_frame.pack(fill="x", padx=Spacing.SM, pady=(0, Spacing.XS))
 
@@ -257,7 +328,7 @@ class ScanFolderList(CTkScrollableFrame):
             row_frame,
             text=folder_name,
             font=Typography.FONT_SM,
-            text_color=Colors.TEXT_PRIMARY.hex,
+            text_color=theme_color("base.foreground"),
             anchor="w"
         )
         name_label.pack(side="left", padx=Spacing.SM, fill="x", expand=True)
@@ -269,9 +340,9 @@ class ScanFolderList(CTkScrollableFrame):
             width=24,
             height=24,
             font=Typography.FONT_LG,
-            fg_color=Colors.TEXT_SECONDARY.hex,
-            hover_color=Colors.DANGER.hex,
-            text_color=Colors.TEXT_PRIMARY.hex,
+            fg_color=theme_color("base.foregroundSecondary"),
+            hover_color=theme_color("feedback.danger"),
+            text_color=theme_color("base.foreground"),
             corner_radius=Spacing.BORDER_RADIUS_SM
         )
         remove_btn.pack(side="right", padx=Spacing.SM)
@@ -340,10 +411,10 @@ class ProtectFolderList(ScanFolderList):
         # Configure scrollbar styling if available
         try:
             self.configure(
-                fg_color=Colors.BG_TERTIARY.hex,
-                scrollbar_fg_color=Colors.BG_SECONDARY.hex,
-                scrollbar_button_color=Colors.BG_TERTIARY.hex,
-                scrollbar_button_hover_color=Colors.WARNING.hex
+                fg_color=theme_color("base.backgroundTertiary"),
+                scrollbar_fg_color=theme_color("panel.background"),
+                scrollbar_button_color=theme_color("base.backgroundTertiary"),
+                scrollbar_button_hover_color=theme_color("feedback.warning")
             )
         except AttributeError:
             pass
@@ -354,12 +425,49 @@ class ProtectFolderList(ScanFolderList):
             text="+ Add Protected Folder",
             height=Dimensions.BUTTON_HEIGHT_MD,
             font=Typography.FONT_SM,
-            fg_color=Colors.WARNING.hex,
-            hover_color=Colors.WARNING_HOVER.hex,
+            fg_color=theme_color("feedback.warning"),
+            hover_color=theme_color("feedback.warning"),
             corner_radius=Spacing.BORDER_RADIUS_SM
         )
         self._add_btn.pack(fill="x", padx=Spacing.SM, pady=(0, Spacing.SM))
         self._add_btn.configure(command=self._trigger_add_folder)
+
+    def _apply_theme(self) -> None:
+        """Apply theme colors to all widgets."""
+        try:
+            self.configure(
+                fg_color=theme_color("base.backgroundTertiary"),
+                scrollbar_fg_color=theme_color("panel.background"),
+                scrollbar_button_color=theme_color("base.backgroundTertiary"),
+                scrollbar_button_hover_color=theme_color("feedback.warning")
+            )
+        except (AttributeError, Exception):
+            pass
+        try:
+            self._add_btn.configure(
+                fg_color=theme_color("feedback.warning"),
+                hover_color=theme_color("feedback.warning")
+            )
+        except Exception:
+            pass
+        # Update existing folder row widgets
+        for path, widgets in self._folder_widgets.items():
+            try:
+                widgets["frame"].configure(fg_color=theme_color("base.backgroundElevated"))
+            except Exception:
+                pass
+            try:
+                widgets["label"].configure(text_color=theme_color("base.foreground"))
+            except Exception:
+                pass
+            try:
+                widgets["button"].configure(
+                    fg_color=theme_color("base.foregroundSecondary"),
+                    hover_color=theme_color("feedback.danger"),
+                    text_color=theme_color("base.foreground")
+                )
+            except Exception:
+                pass
 
 
 class ScanOptionsPanel(CTkFrame):
@@ -378,6 +486,8 @@ class ScanOptionsPanel(CTkFrame):
     def __init__(self, master=None, **kwargs):
         super().__init__(master, **kwargs)
 
+        subscribe_to_theme(self, self._apply_theme)
+
         self._current_mode: str = "files"
         self._option_widgets: Dict[str, tk.Widget] = {}
 
@@ -391,7 +501,7 @@ class ScanOptionsPanel(CTkFrame):
     def _build_ui(self) -> None:
         """Build options panel UI."""
         self.configure(
-            fg_color=Colors.BG_TERTIARY.hex
+            fg_color=theme_color("base.backgroundTertiary")
         )
 
         # Title label
@@ -399,12 +509,21 @@ class ScanOptionsPanel(CTkFrame):
             self,
             text="Scan Options",
             font=Typography.FONT_SM,
-            text_color=Colors.TEXT_SECONDARY.hex
+            text_color=theme_color("base.foregroundSecondary")
         ).pack(anchor="w", padx=Spacing.SM, pady=(Spacing.SM, 0))
 
         # Options container
         self._options_container = CTkFrame(self)
         self._options_container.pack(fill="both", expand=True, padx=Spacing.XS, pady=Spacing.SM)
+
+    def _apply_theme(self) -> None:
+        """Apply theme colors to all widgets."""
+        try:
+            self.configure(fg_color=theme_color("base.backgroundTertiary"))
+        except Exception:
+            pass
+        # Rebuild mode options to pick up new colors
+        self._set_mode_options(self._current_mode)
 
     def _set_mode_options(self, mode: str) -> None:
         """Swap options based on scan mode."""
@@ -509,7 +628,7 @@ class ScanOptionsPanel(CTkFrame):
             self._options_container,
             text=text,
             font=Typography.FONT_SM,
-            text_color=Colors.TEXT_SECONDARY.hex,
+            text_color=theme_color("base.foregroundSecondary"),
             anchor="w"
         ).pack(fill="x", padx=Spacing.SM, pady=(Spacing.SM, 0))
 
@@ -525,9 +644,9 @@ class ScanOptionsPanel(CTkFrame):
             values=values,
             default_value=default,
             font=Typography.FONT_SM,
-            fg_color=Colors.TEXT_PRIMARY.hex,
-            button_color=Colors.BG_QUATERNARY.hex,
-            dropdown_fg_color=Colors.TEXT_PRIMARY.hex
+            fg_color=theme_color("base.foreground"),
+            button_color=theme_color("base.backgroundElevated"),
+            dropdown_fg_color=theme_color("base.foreground")
         )
         menu.pack(fill="x", padx=Spacing.SM, pady=(Spacing.XS, Spacing.SM))
         self._option_widgets[name] = menu
@@ -603,6 +722,8 @@ class FolderPanel(CTkFrame):
     def __init__(self, master=None, **kwargs):
         super().__init__(master, **kwargs)
 
+        subscribe_to_theme(self, self._apply_theme)
+
         # Widgets
         self._scan_folders_section: Optional[CollapsibleSection] = None
         self._protect_folders_section: Optional[CollapsibleSection] = None
@@ -622,7 +743,7 @@ class FolderPanel(CTkFrame):
     def _build_ui(self) -> None:
         """Build folder panel UI."""
         self.configure(
-            fg_color=Colors.BG_SECONDARY.hex
+            fg_color=theme_color("panel.background")
         )
 
         # Scan Folders section
@@ -646,7 +767,7 @@ class FolderPanel(CTkFrame):
             self,
             title="Protect Folders",
             count=0,
-            accent_color=Colors.WARNING.hex
+            accent_color=theme_color("feedback.warning")
         )
         self._protect_folders_section.pack(fill="x", padx=Spacing.XS, pady=Spacing.SM)
 
@@ -670,6 +791,21 @@ class FolderPanel(CTkFrame):
             self._options_section.get_content_frame()
         )
         self._options_panel.pack(fill="both", expand=True)
+
+    def _apply_theme(self) -> None:
+        """Apply theme colors to all widgets."""
+        try:
+            self.configure(fg_color=theme_color("panel.background"))
+        except Exception:
+            pass
+        # Update protect section accent color on theme change
+        if self._protect_folders_section:
+            try:
+                self._protect_folders_section._custom_accent = theme_color("feedback.warning")
+                self._protect_folders_section._accent_color = theme_color("feedback.warning")
+                self._protect_folders_section._apply_theme()
+            except Exception:
+                pass
 
     def _on_scan_folder_added(self, path: Path) -> None:
         """Handle scan folder added."""

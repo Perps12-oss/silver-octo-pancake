@@ -23,7 +23,8 @@ except ImportError:
     CTkButton = tk.Button
     CTkLabel = tk.Label
 
-from cerebro.v2.core.design_tokens import Colors, Spacing, Typography, Dimensions
+from cerebro.v2.core.design_tokens import Spacing, Typography, Dimensions
+from cerebro.v2.core.theme_bridge_v2 import theme_color, subscribe_to_theme
 
 
 class Toolbar(CTkFrame):
@@ -42,6 +43,7 @@ class Toolbar(CTkFrame):
     def __init__(self, master=None, **kwargs):
         """Initialize toolbar."""
         super().__init__(master, **kwargs)
+        subscribe_to_theme(self, self._apply_theme)
 
         # State
         self._folders: List[Path] = []
@@ -78,10 +80,10 @@ class Toolbar(CTkFrame):
             width=Dimensions.BUTTON_HEIGHT_LG,
             height=Dimensions.BUTTON_HEIGHT_MD,
             font=Typography.FONT_MD,
-            fg_color=Colors.BG_TERTIARY.hex,
-            hover_color=Colors.BG_QUATERNARY.hex,
+            fg_color=theme_color("button.secondary"),
+            hover_color=theme_color("button.secondaryHover"),
             border_width=1,
-            border_color=Colors.BORDER.hex,
+            border_color=theme_color("toolbar.border"),
             corner_radius=Spacing.BORDER_RADIUS_MD
         )
 
@@ -92,10 +94,10 @@ class Toolbar(CTkFrame):
             width=Dimensions.BUTTON_HEIGHT_LG,
             height=Dimensions.BUTTON_HEIGHT_MD,
             font=Typography.FONT_MD,
-            fg_color=Colors.BG_TERTIARY.hex,
-            hover_color=Colors.BG_QUATERNARY.hex,
+            fg_color=theme_color("button.secondary"),
+            hover_color=theme_color("button.secondaryHover"),
             border_width=1,
-            border_color=Colors.BORDER.hex,
+            border_color=theme_color("toolbar.border"),
             corner_radius=Spacing.BORDER_RADIUS_MD
         )
 
@@ -104,7 +106,7 @@ class Toolbar(CTkFrame):
             self,
             text="│",
             width=30,
-            text_color=Colors.BORDER.hex,
+            text_color=theme_color("toolbar.border"),
             font=Typography.FONT_LG
         )
 
@@ -115,8 +117,8 @@ class Toolbar(CTkFrame):
             width=Dimensions.BUTTON_HEIGHT_XL,
             height=Dimensions.BUTTON_HEIGHT_MD,
             font=Typography.FONT_MD,
-            fg_color=Colors.ACCENT.hex,
-            hover_color=Colors.ACCENT_HOVER.hex,
+            fg_color=theme_color("button.primary"),
+            hover_color=theme_color("button.primaryHover"),
             border_width=0,
             corner_radius=Spacing.BORDER_RADIUS_MD
         )
@@ -128,8 +130,8 @@ class Toolbar(CTkFrame):
             width=Dimensions.BUTTON_HEIGHT_LG,
             height=Dimensions.BUTTON_HEIGHT_MD,
             font=Typography.FONT_MD,
-            fg_color=Colors.DANGER.hex,
-            hover_color=Colors.DANGER_HOVER.hex,
+            fg_color=theme_color("button.danger"),
+            hover_color=theme_color("button.dangerHover"),
             border_width=0,
             corner_radius=Spacing.BORDER_RADIUS_MD,
             state="disabled"  # Disabled initially
@@ -140,7 +142,7 @@ class Toolbar(CTkFrame):
             self,
             text="│",
             width=30,
-            text_color=Colors.BORDER.hex,
+            text_color=theme_color("toolbar.border"),
             font=Typography.FONT_LG
         )
 
@@ -151,8 +153,8 @@ class Toolbar(CTkFrame):
             width=Dimensions.BUTTON_HEIGHT_MD,
             height=Dimensions.BUTTON_HEIGHT_MD,
             font=Typography.FONT_LG,
-            fg_color=Colors.TEXT_SECONDARY.hex,
-            hover_color=Colors.TEXT_PRIMARY.hex,
+            fg_color=theme_color("toolbar.foreground"),
+            hover_color=theme_color("toolbar.foreground"),
             border_width=0,
             corner_radius=Spacing.BORDER_RADIUS_SM
         )
@@ -164,8 +166,8 @@ class Toolbar(CTkFrame):
             width=Dimensions.BUTTON_HEIGHT_MD,
             height=Dimensions.BUTTON_HEIGHT_MD,
             font=Typography.FONT_LG,
-            fg_color=Colors.TEXT_SECONDARY.hex,
-            hover_color=Colors.TEXT_PRIMARY.hex,
+            fg_color=theme_color("toolbar.foreground"),
+            hover_color=theme_color("toolbar.foreground"),
             border_width=0,
             corner_radius=Spacing.BORDER_RADIUS_SM
         )
@@ -174,7 +176,7 @@ class Toolbar(CTkFrame):
         """Layout the toolbar widgets."""
         self.configure(
             height=Dimensions.TOOLBAR_HEIGHT,
-            fg_color=Colors.BG_SECONDARY.hex
+            fg_color=theme_color("toolbar.background")
         )
 
         # Pack widgets in a horizontal row
@@ -374,6 +376,65 @@ class Toolbar(CTkFrame):
         """
         if path in self._folders:
             self._folders.remove(path)
+
+    def _apply_theme(self) -> None:
+        """Reconfigure all widget colors when the theme changes."""
+        try:
+            self.configure(fg_color=theme_color("toolbar.background"))
+        except Exception:
+            pass
+        try:
+            self._add_path_btn.configure(
+                fg_color=theme_color("button.secondary"),
+                hover_color=theme_color("button.secondaryHover"),
+                border_color=theme_color("toolbar.border"),
+            )
+        except Exception:
+            pass
+        try:
+            self._remove_btn.configure(
+                fg_color=theme_color("button.secondary"),
+                hover_color=theme_color("button.secondaryHover"),
+                border_color=theme_color("toolbar.border"),
+            )
+        except Exception:
+            pass
+        try:
+            self._separator.configure(text_color=theme_color("toolbar.border"))
+        except Exception:
+            pass
+        try:
+            self._start_btn.configure(
+                fg_color=theme_color("button.primary"),
+                hover_color=theme_color("button.primaryHover"),
+            )
+        except Exception:
+            pass
+        try:
+            self._stop_btn.configure(
+                fg_color=theme_color("button.danger"),
+                hover_color=theme_color("button.dangerHover"),
+            )
+        except Exception:
+            pass
+        try:
+            self._separator2.configure(text_color=theme_color("toolbar.border"))
+        except Exception:
+            pass
+        try:
+            self._settings_btn.configure(
+                fg_color=theme_color("toolbar.foreground"),
+                hover_color=theme_color("toolbar.foreground"),
+            )
+        except Exception:
+            pass
+        try:
+            self._help_btn.configure(
+                fg_color=theme_color("toolbar.foreground"),
+                hover_color=theme_color("toolbar.foreground"),
+            )
+        except Exception:
+            pass
 
     def clear_folders(self) -> None:
         """Clear all folders from the list."""

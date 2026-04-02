@@ -25,8 +25,9 @@ except ImportError:
     CTkPanedWindow = tk.PanedWindow
 
 from cerebro.v2.core.design_tokens import (
-    Colors, Spacing, Typography, Dimensions
+    Spacing, Typography, Dimensions
 )
+from cerebro.v2.core.theme_bridge_v2 import theme_color, subscribe_to_theme, set_ctk_appearance_mode
 from cerebro.v2.ui.toolbar import Toolbar
 from cerebro.v2.ui.mode_tabs import ModeTabs
 from cerebro.v2.ui.status_bar import StatusBar
@@ -77,6 +78,7 @@ class MainWindow(CTk):
         self._build_ui()
         self._bind_shortcuts()
         self._bind_window_events()
+        subscribe_to_theme(self, self._apply_theme)
 
     def _setup_window(self) -> None:
         """Configure window properties."""
@@ -95,10 +97,10 @@ class MainWindow(CTk):
     def _setup_theme(self) -> None:
         """Configure CustomTkinter theme."""
         try:
-            ctk.set_appearance_mode("dark")
             ctk.set_default_color_theme("blue")
         except (NameError, AttributeError):
             pass
+        set_ctk_appearance_mode()
 
     def center_window(self) -> None:
         """Center the window on the primary display."""
@@ -112,14 +114,14 @@ class MainWindow(CTk):
     def _build_ui(self) -> None:
         """Build the complete UI layout."""
         # Configure main frame
-        main_frame = CTkFrame(
+        self._main_frame = CTkFrame(
             self,
-            fg_color=Colors.BG_PRIMARY.hex
+            fg_color=theme_color("base.background")
         )
-        main_frame.pack(fill="both", expand=True)
+        self._main_frame.pack(fill="both", expand=True)
 
         # Vertical layout container
-        self._content_container = CTkFrame(main_frame)
+        self._content_container = CTkFrame(self._main_frame)
         self._content_container.pack(fill="both", expand=True)
 
         # Build components top-to-bottom
@@ -183,13 +185,13 @@ class MainWindow(CTk):
         # Create frames for actual panels
         self._left_panel_frame = CTkFrame(
             self._horizontal_paned,
-            fg_color=Colors.BG_SECONDARY.hex,
+            fg_color=theme_color("panel.background"),
             width=Dimensions.LEFT_PANEL_DEFAULT_WIDTH
         )
 
         self._center_panel_frame = CTkFrame(
             self._horizontal_paned,
-            fg_color=Colors.BG_SECONDARY.hex
+            fg_color=theme_color("panel.background")
         )
 
         # Add frames to paned window
@@ -243,7 +245,7 @@ class MainWindow(CTk):
         self._preview_frame = CTkFrame(
             self._content_container,
             height=Dimensions.PREVIEW_PANEL_DEFAULT_HEIGHT,
-            fg_color=Colors.BG_SECONDARY.hex
+            fg_color=theme_color("panel.background")
         )
         self._preview_frame.pack(fill="x", padx=Spacing.MD, pady=Spacing.SM)
 
@@ -533,6 +535,16 @@ github.com/Perps12-oss/dedup"""
         """Handle window resize."""
         # Can be used for responsive layout adjustments
         pass
+
+    def _apply_theme(self) -> None:
+        """Apply current theme colors to all themed widgets."""
+        try:
+            self._main_frame.configure(fg_color=theme_color("base.background"))
+            self._left_panel_frame.configure(fg_color=theme_color("panel.background"))
+            self._center_panel_frame.configure(fg_color=theme_color("panel.background"))
+            self._preview_frame.configure(fg_color=theme_color("panel.background"))
+        except (tk.TclError, AttributeError):
+            pass
 
     def _on_close(self) -> None:
         """Handle window close event."""
