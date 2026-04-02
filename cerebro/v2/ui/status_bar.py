@@ -23,7 +23,8 @@ except ImportError:
     CTkLabel = tk.Label
     CTkProgressBar = ttk.Progressbar
 
-from cerebro.v2.core.design_tokens import Colors, Spacing, Dimensions, Typography
+from cerebro.v2.core.design_tokens import Spacing, Dimensions, Typography
+from cerebro.v2.core.theme_bridge_v2 import theme_color, subscribe_to_theme
 
 
 class StatusBarMetrics:
@@ -91,6 +92,9 @@ class StatusBar(CTkFrame):
         self._polling: bool = False
         self._poll_interval: int = 200  # milliseconds
 
+        # Theme subscription
+        subscribe_to_theme(self, self._apply_theme)
+
         # Build UI
         self._build_widgets()
         self._layout_widgets()
@@ -102,7 +106,7 @@ class StatusBar(CTkFrame):
             self,
             text="Scanned: 0",
             font=Typography.FONT_SM,
-            text_color=Colors.TEXT_SECONDARY.hex
+            text_color=theme_color("status.foreground")
         )
 
         # Duplicates label
@@ -110,7 +114,7 @@ class StatusBar(CTkFrame):
             self,
             text="Duplicates: 0",
             font=Typography.FONT_SM,
-            text_color=Colors.TEXT_SECONDARY.hex
+            text_color=theme_color("status.foreground")
         )
 
         # Groups label
@@ -118,7 +122,7 @@ class StatusBar(CTkFrame):
             self,
             text="Groups: 0",
             font=Typography.FONT_SM,
-            text_color=Colors.TEXT_SECONDARY.hex
+            text_color=theme_color("status.foreground")
         )
 
         # Reclaimable label
@@ -126,7 +130,7 @@ class StatusBar(CTkFrame):
             self,
             text="Reclaimable: 0 B",
             font=Typography.FONT_SM,
-            text_color=Colors.SUCCESS.hex
+            text_color=theme_color("feedback.success")
         )
 
         # Elapsed label
@@ -134,7 +138,7 @@ class StatusBar(CTkFrame):
             self,
             text="Elapsed: 00:00:00",
             font=Typography.FONT_MONO,
-            text_color=Colors.TEXT_SECONDARY.hex
+            text_color=theme_color("status.foreground")
         )
 
         # Progress bar (subtle, thin)
@@ -143,8 +147,8 @@ class StatusBar(CTkFrame):
             orientation="horizontal",
             width=200,
             height=6,
-            progress_color=Colors.ACCENT.hex,
-            fg_color=Colors.BG_SECONDARY.hex
+            progress_color=theme_color("status.accent"),
+            fg_color=theme_color("status.background")
         )
         # Hide initially
         self._progress_bar.set(0)
@@ -234,7 +238,7 @@ class StatusBar(CTkFrame):
         reclaimable = self._format_bytes(self._metrics.bytes_reclaimable)
         self._reclaimable_label.configure(
             text=f"Reclaimable: {reclaimable}",
-            text_color=Colors.SUCCESS.hex
+            text_color=theme_color("feedback.success")
         )
 
         # Format elapsed time
@@ -342,6 +346,24 @@ class StatusBar(CTkFrame):
     def get_metrics(self) -> StatusBarMetrics:
         """Get current metrics."""
         return self._metrics.clone()
+
+    def _apply_theme(self) -> None:
+        """Re-apply theme colors to all widgets."""
+        fg = theme_color("status.foreground")
+        success = theme_color("feedback.success")
+        accent = theme_color("status.accent")
+        bg = theme_color("status.background")
+
+        self._scanned_label.configure(text_color=fg)
+        self._duplicates_label.configure(text_color=fg)
+        self._groups_label.configure(text_color=fg)
+        self._reclaimable_label.configure(text_color=success)
+        self._elapsed_label.configure(text_color=fg)
+
+        self._progress_bar.configure(
+            progress_color=accent,
+            fg_color=bg,
+        )
 
     def _format_bytes(self, bytes_count: int) -> str:
         """

@@ -17,7 +17,8 @@ except ImportError:
     # Fallback to standard tkinter
     CTkSegmentedButton = tk.Frame
 
-from cerebro.v2.core.design_tokens import Colors, Spacing, Typography
+from cerebro.v2.core.design_tokens import Spacing, Typography
+from cerebro.v2.core.theme_bridge_v2 import theme_color, subscribe_to_theme
 
 
 class ScanMode:
@@ -89,6 +90,25 @@ class ModeTabs(CTkSegmentedButton):
 
         # Bind selection change event
         self._bind_events()
+
+        # Theme support
+        subscribe_to_theme(self, self._apply_theme)
+        self._apply_theme()
+
+    def _apply_theme(self):
+        try:
+            self.configure(
+                fg_color=theme_color("tabs.background"),
+                selected_color=theme_color("tabs.activeBackground"),
+                selected_hover_color=theme_color("tabs.activeBackgroundHover"),
+                unselected_color=theme_color("tabs.inactiveBackground"),
+                unselected_hover_color=theme_color("tabs.inactiveBackgroundHover"),
+                text_color=theme_color("tabs.inactiveForeground"),
+                text_color_disabled=theme_color("base.foregroundMuted"),
+                text_color_selected=theme_color("tabs.activeForeground"),
+            )
+        except Exception:
+            pass
 
     def _bind_events(self) -> None:
         """Bind selection change event."""

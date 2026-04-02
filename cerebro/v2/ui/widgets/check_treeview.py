@@ -11,7 +11,8 @@ import tkinter as tk
 from tkinter import ttk
 from typing import List, Optional, Callable, Any
 
-from cerebro.v2.core.design_tokens import Colors, Spacing
+from cerebro.v2.core.design_tokens import Spacing, Typography
+from cerebro.v2.core.theme_bridge_v2 import theme_color, subscribe_to_theme
 
 
 # Checkbox icons (unicode)
@@ -68,6 +69,7 @@ class CheckTreeview(ttk.Treeview):
 
         # Tags for styling
         self._setup_tags()
+        subscribe_to_theme(self, self._apply_theme)
 
         # Bind selection events
         self.bind("<<TreeviewSelect>>", self._on_select)
@@ -77,21 +79,21 @@ class CheckTreeview(ttk.Treeview):
         """Setup tag configurations for styling."""
         self.tag_configure(
             "checked",
-            foreground=Colors.TEXT_PRIMARY.hex
+            foreground=theme_color("results.foreground")
         )
         self.tag_configure(
             "unchecked",
-            foreground=Colors.TEXT_PRIMARY.hex
+            foreground=theme_color("results.foreground")
         )
         self.tag_configure(
             "group_header",
-            background=Colors.BG_QUATERNARY.hex,
-            foreground=Colors.TEXT_PRIMARY.hex,
+            background=theme_color("results.groupHeader"),
+            foreground=theme_color("results.foreground"),
             font=(Typography.FONT_MD[0], Typography.FONT_MD[1], "bold")
         )
         self.tag_configure(
             "row_even",
-            background=Colors.BG_TERTIARY.hex
+            background=theme_color("results.rowEven")
         )
         self.tag_configure(
             "row_odd",
@@ -99,8 +101,12 @@ class CheckTreeview(ttk.Treeview):
         )
         self.tag_configure(
             "protected",
-            foreground=Colors.WARNING.hex
+            foreground=theme_color("feedback.warning")
         )
+
+    def _apply_theme(self) -> None:
+        """Re-apply tag configurations when theme changes."""
+        self._setup_tags()
 
     def insert_group(self, parent: str, group_id: str, text: str,
                     **kwargs) -> str:

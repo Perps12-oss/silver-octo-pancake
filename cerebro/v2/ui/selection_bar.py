@@ -23,7 +23,8 @@ except ImportError:
     CTkLabel = tk.Label
     CTkOptionMenu = tk.OptionMenu
 
-from cerebro.v2.core.design_tokens import Colors, Spacing, Typography, Dimensions
+from cerebro.v2.core.design_tokens import Spacing, Typography, Dimensions
+from cerebro.v2.core.theme_bridge_v2 import theme_color, subscribe_to_theme
 
 
 class SelectionRule:
@@ -115,6 +116,9 @@ class SelectionBar(CTkFrame):
         self._build_widgets()
         self._layout_widgets()
 
+        # Theme support
+        subscribe_to_theme(self, self._apply_theme)
+
     def _build_widgets(self) -> None:
         """Build all selection bar widgets."""
         # Rule dropdown
@@ -126,11 +130,11 @@ class SelectionBar(CTkFrame):
             width=200,
             height=Dimensions.BUTTON_HEIGHT_MD,
             font=Typography.FONT_MD,
-            fg_color=Colors.TEXT_PRIMARY.hex,
-            button_color=Colors.BG_TERTIARY.hex,
-            button_hover_color=Colors.BG_QUATERNARY.hex,
-            dropdown_fg_color=Colors.TEXT_PRIMARY.hex,
-            dropdown_hover_color=Colors.ACCENT.hex
+            fg_color=theme_color("input.background"),
+            button_color=theme_color("button.secondary"),
+            button_hover_color=theme_color("button.secondaryHover"),
+            dropdown_fg_color=theme_color("input.background"),
+            dropdown_hover_color=theme_color("button.primary")
         )
 
         # Apply button
@@ -140,8 +144,8 @@ class SelectionBar(CTkFrame):
             width=80,
             height=Dimensions.BUTTON_HEIGHT_MD,
             font=Typography.FONT_MD,
-            fg_color=Colors.ACCENT.hex,
-            hover_color=Colors.ACCENT_HOVER.hex,
+            fg_color=theme_color("button.primary"),
+            hover_color=theme_color("button.primaryHover"),
             command=self.trigger_apply_rule
         )
 
@@ -150,11 +154,11 @@ class SelectionBar(CTkFrame):
             self,
             text="0 of 0 selected",
             font=Typography.FONT_MD,
-            text_color=Colors.TEXT_SECONDARY.hex
+            text_color=theme_color("selection.foreground")
         )
 
         # Separator
-        separator1 = CTkLabel(self, text="│", text_color=Colors.BORDER.hex)
+        self._separator1 = CTkLabel(self, text="│", text_color=theme_color("selection.border"))
 
         # Select All button
         self._select_all_btn = CTkButton(
@@ -163,8 +167,8 @@ class SelectionBar(CTkFrame):
             width=100,
             height=Dimensions.BUTTON_HEIGHT_MD,
             font=Typography.FONT_SM,
-            fg_color=Colors.BG_TERTIARY.hex,
-            hover_color=Colors.BG_QUATERNARY.hex,
+            fg_color=theme_color("button.secondary"),
+            hover_color=theme_color("button.secondaryHover"),
             command=self.trigger_select_all
         )
 
@@ -175,8 +179,8 @@ class SelectionBar(CTkFrame):
             width=110,
             height=Dimensions.BUTTON_HEIGHT_MD,
             font=Typography.FONT_SM,
-            fg_color=Colors.BG_TERTIARY.hex,
-            hover_color=Colors.BG_QUATERNARY.hex,
+            fg_color=theme_color("button.secondary"),
+            hover_color=theme_color("button.secondaryHover"),
             command=self.trigger_deselect_all
         )
 
@@ -187,13 +191,13 @@ class SelectionBar(CTkFrame):
             width=80,
             height=Dimensions.BUTTON_HEIGHT_MD,
             font=Typography.FONT_SM,
-            fg_color=Colors.BG_TERTIARY.hex,
-            hover_color=Colors.BG_QUATERNARY.hex,
+            fg_color=theme_color("button.secondary"),
+            hover_color=theme_color("button.secondaryHover"),
             command=self.trigger_invert
         )
 
         # Separator
-        separator2 = CTkLabel(self, text="│", text_color=Colors.BORDER.hex)
+        self._separator2 = CTkLabel(self, text="│", text_color=theme_color("selection.border"))
 
         # Delete Selected button
         self._delete_btn = CTkButton(
@@ -202,8 +206,8 @@ class SelectionBar(CTkFrame):
             width=160,
             height=Dimensions.BUTTON_HEIGHT_MD,
             font=Typography.FONT_MD,
-            fg_color=Colors.DANGER.hex,
-            hover_color=Colors.DANGER_HOVER.hex,
+            fg_color=theme_color("button.danger"),
+            hover_color=theme_color("button.dangerHover"),
             command=self.trigger_delete_selected
         )
 
@@ -211,7 +215,7 @@ class SelectionBar(CTkFrame):
         """Layout the selection bar widgets."""
         self.configure(
             height=Dimensions.BUTTON_HEIGHT_LG,
-            fg_color=Colors.BG_SECONDARY.hex
+            fg_color=theme_color("selection.background")
         )
 
         self._rule_menu.pack(
@@ -232,7 +236,7 @@ class SelectionBar(CTkFrame):
             pady=(Spacing.SM, Spacing.SM)
         )
 
-        separator1.pack(side="left", padx=Spacing.XS)
+        self._separator1.pack(side="left", padx=Spacing.XS)
         self._select_all_btn.pack(
             side="left",
             padx=Spacing.SM,
@@ -251,7 +255,7 @@ class SelectionBar(CTkFrame):
             pady=(Spacing.SM, Spacing.SM)
         )
 
-        separator2.pack(side="left", padx=Spacing.XS)
+        self._separator2.pack(side="left", padx=Spacing.XS)
         self._delete_btn.pack(
             side="left",
             padx=Spacing.MD,
@@ -261,6 +265,53 @@ class SelectionBar(CTkFrame):
         # Spacer
         spacer = CTkLabel(self, text="")
         spacer.pack(side="right", padx=Spacing.LG)
+
+    def _apply_theme(self) -> None:
+        """Reconfigure all widgets with current theme colors."""
+        try:
+            self.configure(fg_color=theme_color("selection.background"))
+
+            self._rule_menu.configure(
+                fg_color=theme_color("input.background"),
+                button_color=theme_color("button.secondary"),
+                button_hover_color=theme_color("button.secondaryHover"),
+                dropdown_fg_color=theme_color("input.background"),
+                dropdown_hover_color=theme_color("button.primary"),
+            )
+
+            self._apply_btn.configure(
+                fg_color=theme_color("button.primary"),
+                hover_color=theme_color("button.primaryHover"),
+            )
+
+            self._selected_label.configure(
+                text_color=theme_color("selection.foreground"),
+            )
+
+            self._separator1.configure(text_color=theme_color("selection.border"))
+            self._separator2.configure(text_color=theme_color("selection.border"))
+
+            self._select_all_btn.configure(
+                fg_color=theme_color("button.secondary"),
+                hover_color=theme_color("button.secondaryHover"),
+            )
+
+            self._deselect_all_btn.configure(
+                fg_color=theme_color("button.secondary"),
+                hover_color=theme_color("button.secondaryHover"),
+            )
+
+            self._invert_btn.configure(
+                fg_color=theme_color("button.secondary"),
+                hover_color=theme_color("button.secondaryHover"),
+            )
+
+            self._delete_btn.configure(
+                fg_color=theme_color("button.danger"),
+                hover_color=theme_color("button.dangerHover"),
+            )
+        except Exception:
+            pass
 
     def _refresh_selected_label(self) -> None:
         """Refresh the selected counter label."""
