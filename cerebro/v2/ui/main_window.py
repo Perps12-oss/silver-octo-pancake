@@ -8,8 +8,9 @@ Handles window lifecycle, panel organization, and keyboard shortcuts.
 from __future__ import annotations
 
 import tkinter as tk
-from typing import Optional, Callable, List
+from typing import Optional, Callable, List, Dict, Any
 from pathlib import Path
+import time
 
 try:
     import customtkinter as ctk
@@ -29,12 +30,16 @@ from cerebro.v2.core.design_tokens import (
 )
 from cerebro.v2.ui.toolbar import Toolbar
 from cerebro.v2.ui.mode_tabs import ModeTabs
-from cerebro.v2.ui.status_bar import StatusBar
+from cerebro.v2.ui.status_bar import StatusBar, StatusBarMetrics
 from cerebro.v2.ui.selection_bar import SelectionBar
 from cerebro.v2.ui.settings_dialog import SettingsDialog, Settings
 from cerebro.v2.ui.folder_panel import FolderPanel
-from cerebro.v2.ui.results_panel import ResultsPanel
+from cerebro.v2.ui.results_panel import ResultsPanel, DuplicateGroup as ResultsDuplicateGroup
 from cerebro.v2.ui.preview_panel import PreviewPanel
+from cerebro.engines.orchestrator import ScanOrchestrator
+from cerebro.engines.base_engine import (
+    ScanProgress, ScanState, DuplicateGroup, DuplicateFile
+)
 
 
 class MainWindow(CTk):
@@ -70,6 +75,18 @@ class MainWindow(CTk):
         self._current_scan_mode: str = "files"
         self._scanning: bool = False
         self._preview_collapsed: bool = False
+
+        # Scan state
+        self._scan_start_time: float = 0.0
+        self._polling_enabled: bool = False
+        self._selected_file_ids: List[str] = []  # For preview panel
+
+        # Scan results (core.DuplicateGroup format)
+        self._scan_results: List[DuplicateGroup] = []
+
+        # Create orchestrator
+        self._orchestrator = ScanOrchestrator()
+        self._orchestrator.set_mode("files")
 
         # Initialize components
         self._setup_window()
@@ -322,25 +339,53 @@ class MainWindow(CTk):
         """Handle start search button."""
         folders = self._folder_panel.get_scan_folders()
         if not folders:
-            print("No folders selected for scanning")
+            from tkinter import messagebox
+            messagebox.showwarning("No Folders", "Please add at least one folder to scan.")
             return
 
-        print("Starting search...")
+        # Clear previous results
+        self._scan_results.clear()
+        self._results_panel.clear()
+        self._status_bar.reset()
+
+        # Reset state
+        self._scan_start_time = time.time()
         self._scanning = True
         self._toolbar.set_scanning(True)
         self._status_bar.set_scanning(True)
-        # TODO: Trigger scan with engine orchestrator when implemented
-        # Scan mode: self.get_scan_mode()
-        # Folders: folders
-        # Options: self._folder_panel.get_options()
+
+        # Get scan parameters
+        scan_mode = self.get_scan_mode()
+        protected_folders = self._folder_panel.get_protected_folders()
+        scan_options = self._folder_panel.get_options()
+
+        print(f"Starting scan in {scan_mode} mode...")
+        print(f"Folders: {[str(f) for f in folders]}")
+        print(f"Protected: {[str(f) for f in protected_folders]}")
+        print(f"Options: {scan_options}")
+
+        # Set mode and start scan
+        self._orchestrator.set_mode(scan_mode)
+
+        try:
+            self._orchestrator.start_scan(
+                folders=folders,
+                protected=protected_folders,
+                options=scan_options,
+                progress_callback=self._on_scan_progress
+            )
+            # Start polling for progress updates
+            self._start_progress_polling()
+        except RuntimeError as e:
+            print(f"Failed to start scan: {e}")
+            self._on_scan_finished()
 
     def _on_stop_search(self) -> None:
         """Handle stop search button."""
         print("Stopping search...")
-        self._scanning = False
-        self._toolbar.set_scanning(False)
-        self._status_bar.set_scanning(False)
-        # TODO: Cancel scan with engine orchestrator when implemented
+        self._orchestrator.cancel()
+        # Stop will be detected via progress callback
+        # Don't reset state yet - wait for scan to fully stop
 
     def _on_settings(self) -> None:
         """Handle settings button."""
@@ -388,15 +433,262 @@ github.com/Perps12-oss/dedup"""
         """Handle scan options changes."""
         print(f"Options changed for mode {mode}: {options}")
 
+    # ===================
+    # SCAN INTEGRATION
+    # ===================
+
+    def _on_scan_progress(self, progress: ScanProgress) -> None:
+        """
+        Handle progress updates from scan engine.
+
+        Args:
+            progress: ScanProgress object with current scan state.
+        """
+        # Update status bar with scan metrics
+        self._update_status_bar(progress)
+
+        # Check if scan finished
+        if progress.state in (ScanState.COMPLETED, ScanState.CANCELLED, ScanState.ERROR):
+            self._on_scan_finished(progress.state)
+
+    def _update_status_bar(self, progress: ScanProgress) -> None:
+        """
+        Update status bar with scan progress.
+
+        Args:
+            progress: ScanProgress object.
+        """
+        elapsed = time.time() - self._scan_start_time if self._scan_start_time > 0 else 0.0
+
+        metrics = StatusBarMetrics(
+            files_scanned=progress.files_scanned,
+            duplicates_found=progress.duplicates_found,
+            groups_found=progress.groups_found,
+            bytes_reclaimable=progress.bytes_reclaimable,
+            elapsed_seconds=elapsed,
+            is_scanning=(progress.state == ScanState.SCANNING),
+            progress_percent=min(100.0, elapsed * 5) if progress.files_total > 0 else 0.0
+        )
+
+        self._status_bar.update_metrics(metrics)
+
+        # Show current file if available
+        if progress.current_file and progress.state == ScanState.SCANNING:
+            self._status_bar.after(0, lambda: self._status_bar._elapsed_label.configure(
+                text=f"Scanning: {Path(progress.current_file).name[:40]}..."
+            ))
+
+    def _start_progress_polling(self) -> None:
+        """Start periodic polling for scan progress updates."""
+        if self._polling_enabled:
+            return
+
+        self._polling_enabled = True
+
+        def poll():
+            if not self._polling_enabled or not self._scanning:
+                return
+
+            # Get current progress from orchestrator
+            progress = self._orchestrator.get_progress()
+            self._update_status_bar(progress)
+
+            # Continue polling
+            self.after(200, poll)
+
+        self.after(200, poll)
+
+    def _stop_progress_polling(self) -> None:
+        """Stop periodic polling for scan progress updates."""
+        self._polling_enabled = False
+
+    def _on_scan_finished(self, final_state: ScanState = ScanState.COMPLETED) -> None:
+        """
+        Handle scan completion.
+
+        Args:
+            final_state: The final state of the scan (completed/cancelled/error).
+        """
+        # Stop polling
+        self._stop_progress_polling()
+
+        # Update UI state
+        self._scanning = False
+        self._toolbar.set_scanning(False)
+        self._status_bar.set_scanning(False)
+
+        # Get results from orchestrator
+        self._scan_results = self._orchestrator.get_results()
+        print(f"Scan finished with state: {final_state}")
+        print(f"Found {len(self._scan_results)} duplicate groups")
+
+        # Load results into panel
+        if self._scan_results:
+            self._load_results_to_panel()
+
+        # Show completion message
+        from tkinter import messagebox
+        if final_state == ScanState.COMPLETED:
+            total_files = sum(len(g.files) for g in self._scan_results)
+            reclaimable = sum(g.reclaimable for g in self._scan_results)
+            reclaimable_str = self._format_bytes(reclaimable)
+            messagebox.showinfo(
+                "Scan Complete",
+                f"Found {len(self._scan_results)} duplicate groups\n"
+                f"Total files: {total_files}\n"
+                f"Space reclaimable: {reclaimable_str}"
+            )
+        elif final_state == ScanState.CANCELLED:
+            messagebox.showinfo("Scan Cancelled", "Scan was cancelled by user.")
+        elif final_state == ScanState.ERROR:
+            messagebox.showerror("Scan Error", "An error occurred during scanning.")
+
+    def _load_results_to_panel(self) -> None:
+        """Load scan results into the results panel."""
+        # Transform core.DuplicateGroup to results panel format
+        results_groups = self._transform_results(self._scan_results)
+        self._results_panel.load_results(results_groups)
+
+    def _transform_results(self, core_groups: List[DuplicateGroup]) -> List[ResultsDuplicateGroup]:
+        """
+        Transform core.DuplicateGroup to results panel format.
+
+        Args:
+            core_groups: List of core.DuplicateGroup objects from engine.
+
+        Returns:
+            List of results panel DuplicateGroup objects.
+        """
+        results_groups = []
+
+        for core_group in core_groups:
+            # Transform files
+            files_list = []
+            for file_obj in core_group.files:
+                files_list.append({
+                    "path": str(file_obj.path),
+                    "size": file_obj.size,
+                    "modified": file_obj.modified,
+                    "similarity": file_obj.similarity,
+                    "checked": False,  # Will be marked by selection rule
+                    "extension": file_obj.extension or Path(file_obj.path).suffix.lower()
+                })
+
+            # Create results panel group
+            total_size = sum(f["size"] for f in files_list)
+            reclaimable = total_size - max(f["size"] for f in files_list) if files_list else 0
+
+            results_group = ResultsDuplicateGroup(
+                group_id=core_group.group_id,
+                files=files_list,
+                total_size=total_size,
+                reclaimable=reclaimable
+            )
+            results_groups.append(results_group)
+
+        return results_groups
+
+    def _format_bytes(self, bytes_count: int) -> str:
+        """Format bytes to human-readable string."""
+        if bytes_count == 0:
+            return "0 B"
+
+        units = ["B", "KB", "MB", "GB", "TB"]
+        unit_index = 0
+        size = float(bytes_count)
+
+        while size >= 1024 and unit_index < len(units) - 1:
+            size /= 1024
+            unit_index += 1
+
+        if unit_index == 0:
+            return f"{int(size)} {units[unit_index]}"
+        else:
+            return f"{size:.1f} {units[unit_index]}"
+
+    # ===================
+    # PREVIEW INTEGRATION
+    # ===================
+
     def _on_keep_a(self) -> None:
         """Handle keep file A button in preview."""
-        print("Keep A clicked")
-        # TODO: Mark file A as keeper in results
+        if not self._selected_file_ids or len(self._selected_file_ids) < 1:
+            return
+
+        # Get the first selected file
+        file_data = self._get_file_data_by_id(self._selected_file_ids[0])
+        if file_data:
+            # Mark this file as the keeper (unchecked)
+            item_id = self._selected_file_ids[0]
+            self._results_panel._treeview.set_check(item_id, False)
+            # Check all other files in the same group
+            self._mark_others_in_group_checked(item_id, True)
+            # Update selection count
+            self._on_selection_changed(self._results_panel._treeview.get_checked())
 
     def _on_keep_b(self) -> None:
         """Handle keep file B button in preview."""
-        print("Keep B clicked")
-        # TODO: Mark file B as keeper in results
+        if not self._selected_file_ids or len(self._selected_file_ids) < 2:
+            return
+
+        # Get the second selected file
+        file_data = self._get_file_data_by_id(self._selected_file_ids[1])
+        if file_data:
+            # Mark this file as the keeper (unchecked)
+            item_id = self._selected_file_ids[1]
+            self._results_panel._treeview.set_check(item_id, False)
+            # Check all other files in the same group
+            self._mark_others_in_group_checked(item_id, True)
+            # Update selection count
+            self._on_selection_changed(self._results_panel._treeview.get_checked())
+
+    def _get_file_data_by_id(self, item_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get file data from results panel by item ID.
+
+        Args:
+            item_id: The item ID in format "group_idx_file_idx".
+
+        Returns:
+            File data dict or None.
+        """
+        # Parse item_id: group_index_file_index
+        parts = item_id.split("_")
+        if len(parts) != 2:
+            return None
+
+        group_id = int(parts[0])
+        file_index = int(parts[1])
+
+        # Find in filtered groups
+        for group in self._results_panel._filtered_groups:
+            if group.group_id == group_id and file_index < len(group.files):
+                return group.files[file_index]
+        return None
+
+    def _mark_others_in_group_checked(self, exclude_item_id: str, checked: bool) -> None:
+        """
+        Mark all other files in the same group as checked/unchecked.
+
+        Args:
+            exclude_item_id: Item ID to exclude.
+            checked: Whether to mark as checked or unchecked.
+        """
+        # Parse item_id to get group
+        parts = exclude_item_id.split("_")
+        if len(parts) != 2:
+            return
+
+        group_id = int(parts[0])
+
+        # Find all other items in the same group
+        for group in self._results_panel._filtered_groups:
+            if group.group_id == group_id:
+                for i in range(len(group.files)):
+                    other_id = f"{group_id}_{i}"
+                    if other_id != exclude_item_id:
+                        self._results_panel._treeview.set_check(other_id, checked)
+                break
 
     def _on_mode_changed(self, new_mode: str) -> None:
         """Handle mode tab change."""
@@ -462,14 +754,94 @@ github.com/Perps12-oss/dedup"""
         )
 
         if confirm:
-            # TODO: Actually delete files
-            print(f"Deleting {len(selected_files)} files...")
-            messagebox.showinfo(
-                "Delete",
-                f"Deleted {len(selected_files)} files."
-            )
+            # Actually delete files using send2trash
+            success_count = 0
+            failed_files = []
+
+            try:
+                from send2trash import send2trash
+            except ImportError:
+                from tkinter import messagebox
+                messagebox.showerror(
+                    "Dependency Missing",
+                    "send2trash package is required.\n\n"
+                    "Install with: pip install send2trash"
+                )
+                return
+
+            # Delete each selected file
+            for file_data in selected_files:
+                file_path = Path(file_data.get("path", ""))
+                try:
+                    send2trash(str(file_path))
+                    success_count += 1
+                except Exception as e:
+                    failed_files.append((str(file_path), str(e)))
+
+            # Show result
+            from tkinter import messagebox
+            if failed_files:
+                failed_list = "\n".join(f"{f}: {e}" for f, e in failed_files[:5])
+                more = f"\n... and {len(failed_files) - 5} more" if len(failed_files) > 5 else ""
+                messagebox.showwarning(
+                    "Delete Partially Failed",
+                    f"Deleted {success_count}/{len(selected_files)} files.\n\n"
+                    f"Failed:\n{failed_list}{more}"
+                )
+            else:
+                messagebox.showinfo(
+                    "Delete Complete",
+                    f"Successfully deleted {success_count} files.\n\n"
+                    f"Reclaimed: {reclaimable_str}"
+                )
+
+            # Remove deleted files from results
+            self._remove_deleted_files(selected_files)
+
             # Clear selection
             self._on_deselect_all()
+
+            # Update status bar reclaimable
+            new_reclaimable = self._results_panel.get_reclaimable_space()
+            self._status_bar.update_reclaimable(new_reclaimable)
+
+    def _remove_deleted_files(self, deleted_files: List[Dict[str, Any]]) -> None:
+        """
+        Remove deleted files from the results panel.
+
+        Args:
+            deleted_files: List of file data dictionaries for deleted files.
+        """
+        deleted_paths = {f.get("path", "") for f in deleted_files}
+
+        # Remove deleted files from filtered groups
+        groups_to_update = []
+        for group in self._results_panel._filtered_groups:
+            # Filter out deleted files
+            remaining_files = [
+                f for f in group.files
+                if f.get("path", "") not in deleted_paths
+            ]
+
+            if remaining_files:
+                # Update group with remaining files
+                new_total_size = sum(f.get("size", 0) for f in remaining_files)
+                new_reclaimable = new_total_size - max(f.get("size", 0) for f in remaining_files) if remaining_files else 0
+
+                group.files = remaining_files
+                group.total_size = new_total_size
+                group.reclaimable = new_reclaimable
+                groups_to_update.append(group)
+            # If group is now empty, it will be removed by _refresh_treeview
+
+        # Update filtered groups
+        self._results_panel._filtered_groups = [
+            g for g in self._results_panel._filtered_groups if g.files
+        ]
+
+        # Refresh treeview
+        self._results_panel._refresh_treeview()
+        self._results_panel._update_status()
 
     def _on_selection_changed(self, checked_items: List[str]) -> None:
         """Handle selection changes from results panel."""
@@ -478,23 +850,37 @@ github.com/Perps12-oss/dedup"""
         # Enable/disable delete button based on selection
         self._selection_bar.set_delete_enabled(len(checked_items) > 0)
 
-    def _format_bytes(self, bytes_count: int) -> str:
-        """Format bytes to human-readable string."""
-        if bytes_count == 0:
-            return "0 B"
+        # Update preview panel
+        self._update_preview_panel(checked_items)
 
-        units = ["B", "KB", "MB", "GB", "TB"]
-        unit_index = 0
-        size = float(bytes_count)
+    def _update_preview_panel(self, checked_items: List[str]) -> None:
+        """
+        Update preview panel based on selected files.
 
-        while size >= 1024 and unit_index < len(units) - 1:
-            size /= 1024
-            unit_index += 1
+        Args:
+            checked_items: List of checked item IDs.
+        """
+        # Store selected file IDs for keep buttons
+        self._selected_file_ids = checked_items[:2]  # Max 2 for comparison
 
-        if unit_index == 0:
-            return f"{int(size)} {units[unit_index]}"
+        # Get file data for preview
+        files_data = []
+        for item_id in checked_items[:2]:  # Only show first 2 selected
+            file_data = self._get_file_data_by_id(item_id)
+            if file_data:
+                files_data.append(file_data)
+
+        # Update preview panel based on selection
+        if not files_data:
+            self._preview_panel.clear()
+        elif len(files_data) == 1:
+            # Single file preview
+            self._preview_panel.load_single(files_data[0])
+        elif len(files_data) >= 2:
+            # Side-by-side comparison
+            self._preview_panel.load_comparison(files_data[0], files_data[1])
         else:
-            return f"{size:.1f} {units[unit_index]}"
+            self._preview_panel.clear()
 
     def _set_mode(self, mode_num: int) -> None:
         """Set scan mode via keyboard shortcut (1-6)."""

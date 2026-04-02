@@ -1,6 +1,6 @@
 # Cerebro v2 — Implementation Progress
 
-## Status: Phase 1 Complete | Ready for Phase 2
+## Status: Phase 1 ✅ | Phase 2 ✅ | Ready for Phase 3
 
 ---
 
@@ -37,7 +37,22 @@
 
 ---
 
-## Phase 2 — File Dedup Engine (Wire-Up) 🔄 NEXT
+## Phase 2 — File Dedup Engine (Wire-Up) ✅ COMPLETE
+
+**Status:** See `PHASE_2_PROGRESS.md` for detailed implementation.
+
+**Summary:**
+- ✅ Wire toolbar Start/Stop to orchestrator
+- ✅ Wire progress callback to status bar
+- ✅ Wire results to CheckTreeview
+- ✅ Wire result selection to preview
+- ✅ Wire "Delete Selected" to send2trash
+- ✅ Wire results sub-filter tabs (via results_panel)
+
+**Files Modified:**
+- `cerebro/v2/ui/main_window.py` - Added ~250 lines of integration code
+
+---
 
 **Goal:** Connect Phase 0 file dedup engine to Phase 1 shell. First fully functional scan mode.
 

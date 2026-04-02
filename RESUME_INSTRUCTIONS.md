@@ -11,10 +11,10 @@ I'm working on Cerebro v2 refactoring (Ashisoft Edition).
 📋 Implementation Plan: C:\Users\S8633\Downloads\CEREBRO_V2_IMPLEMENTATION_PLAN (1).md
 
 === CURRENT STATUS ===
-Progress: Phase 0 ✅ | Phase 1 ✅ | Phase 2 🔄 Next
+Progress: Phase 0 ✅ | Phase 1 ✅ | Phase 2 ✅ | Phase 3 🔄 Next
 
-Latest commit: [check git log]
-Current phase: Phase 2 - File Dedup Engine Wire-Up
+Latest commit: 8138f29 Phase 1 Complete - Single-Window Shell Integration
+Current phase: Phase 3 - Image Dedup Engine + Preview
 
 === TO RESUME ===
 1. Read PHASE_X_PROGRESS.md for detailed status
@@ -56,8 +56,8 @@ Current phase: Phase 2 - File Dedup Engine Wire-Up
 |-------|------|--------|
 | Phase 0 | (included in Phase 1) | ✅ Complete |
 | Phase 1 | `PHASE_1_PROGRESS.md` | ✅ Complete |
-| Phase 2 | `PHASE_2_PROGRESS.md` | 🔄 Next |
-| Phase 3 | `PHASE_3_PROGRESS.md` | Pending |
+| Phase 2 | `PHASE_2_PROGRESS.md` | ✅ Complete |
+| Phase 3 | `PHASE_3_PROGRESS.md` | 🔄 Next |
 | Phase 4 | `PHASE_4_PROGRESS.md` | Pending |
 | Phase 5 | `PHASE_5_PROGRESS.md` | Pending |
 | Phase 6 | `PHASE_6_PROGRESS.md` | Pending |
@@ -117,7 +117,28 @@ git show HEAD
 - `widgets/zoom_canvas.py` - Zoom/pan canvas
 - `widgets/check_treeview.py` - Treeview with checkboxes
 
-### Phase 2 🔄 - File Dedup Engine (Wire-Up)
+### Phase 2 ✅ - File Dedup Engine Wire-Up
+- `main_window.py` - Root window with all panels
+- `toolbar.py` - Top toolbar with all buttons
+- `mode_tabs.py` - 6-mode tab selector
+- `folder_panel.py` - Left panel (folders + protect + options)
+- `results_panel.py` - Center panel with CheckTreeview
+- `preview_panel.py` - Bottom panel with dual canvases
+- `selection_bar.py` - Selection assistant
+- `status_bar.py` - Live status bar
+- `settings_dialog.py` - Modal settings dialog
+- `widgets/zoom_canvas.py` - Zoom/pan canvas
+- `widgets/check_treeview.py` - Treeview with checkboxes
+
+### Phase 2 ✅ - File Dedup Engine (Wire-Up)
+- Wire toolbar "Start Search" to orchestrator
+- Wire progress callback to status bar
+- Wire results to CheckTreeview
+- Wire result selection to preview
+- Wire "Delete Selected" to send2trash
+- Wire results sub-filter tabs
+
+### Phase 3 🔄 - Image Dedup Engine + Preview
 - Wire toolbar "Start Search" to orchestrator
 - Wire progress callback to status bar
 - Wire results to CheckTreeview
