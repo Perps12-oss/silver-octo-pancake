@@ -459,15 +459,18 @@ github.com/Perps12-oss/dedup"""
 
     def _on_scan_progress(self, progress: ScanProgress) -> None:
         """
-        Handle progress updates from scan engine.
+        Handle progress updates from scan engine (called from background thread).
 
         Args:
             progress: ScanProgress object with current scan state.
         """
-        # Update status bar with scan metrics
+        # Marshal all UI updates onto the main thread
+        self.after(0, lambda p=progress: self._handle_progress_on_main(p))
+
+    def _handle_progress_on_main(self, progress: ScanProgress) -> None:
+        """Process a progress update on the main thread."""
         self._update_status_bar(progress)
 
-        # Check if scan finished
         if progress.state in (ScanState.COMPLETED, ScanState.CANCELLED, ScanState.ERROR):
             self._on_scan_finished(progress.state)
 
@@ -549,22 +552,20 @@ github.com/Perps12-oss/dedup"""
         if self._scan_results:
             self._load_results_to_panel()
 
-        # Show completion message
-        from tkinter import messagebox
+        # Show completion summary in status bar (non-blocking)
         if final_state == ScanState.COMPLETED:
             total_files = sum(len(g.files) for g in self._scan_results)
             reclaimable = sum(g.reclaimable for g in self._scan_results)
-            reclaimable_str = self._format_bytes(reclaimable)
-            messagebox.showinfo(
-                "Scan Complete",
-                f"Found {len(self._scan_results)} duplicate groups\n"
-                f"Total files: {total_files}\n"
-                f"Space reclaimable: {reclaimable_str}"
-            )
-        elif final_state == ScanState.CANCELLED:
-            messagebox.showinfo("Scan Cancelled", "Scan was cancelled by user.")
-        elif final_state == ScanState.ERROR:
-            messagebox.showerror("Scan Error", "An error occurred during scanning.")
+            elapsed = time.time() - self._scan_start_time if self._scan_start_time > 0 else 0.0
+            self._status_bar.update_metrics(StatusBarMetrics(
+                files_scanned=total_files,
+                duplicates_found=total_files - len(self._scan_results),
+                groups_found=len(self._scan_results),
+                bytes_reclaimable=reclaimable,
+                elapsed_seconds=elapsed,
+                is_scanning=False,
+                progress_percent=100.0,
+            ))
 
     def _load_results_to_panel(self) -> None:
         """Load scan results into the results panel."""
@@ -770,10 +771,11 @@ github.com/Perps12-oss/dedup"""
         reclaimable_str = self._format_bytes(reclaimable_space)
 
         confirm = messagebox.askyesno(
-            "Confirm Delete",
-            f"Are you sure you want to delete {len(selected_files)} files?\n\n"
-            f"Reclaimable space: {reclaimable_str}\n\n"
-            f"This action cannot be undone."
+            "Send to Recycle Bin",
+            f"Send {len(selected_files)} files to the Recycle Bin?\n\n"
+            f"Space freed: {reclaimable_str}\n\n"
+            f"You can restore them from the Recycle Bin if needed.",
+            icon="warning"
         )
 
         if confirm:

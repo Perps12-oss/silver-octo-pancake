@@ -84,7 +84,8 @@ class Toolbar(CTkFrame):
             hover_color=theme_color("button.secondaryHover"),
             border_width=1,
             border_color=theme_color("toolbar.border"),
-            corner_radius=Spacing.BORDER_RADIUS_MD
+            corner_radius=Spacing.BORDER_RADIUS_MD,
+            command=self._trigger_add_path
         )
 
         # Remove button
@@ -98,7 +99,8 @@ class Toolbar(CTkFrame):
             hover_color=theme_color("button.secondaryHover"),
             border_width=1,
             border_color=theme_color("toolbar.border"),
-            corner_radius=Spacing.BORDER_RADIUS_MD
+            corner_radius=Spacing.BORDER_RADIUS_MD,
+            command=lambda: self._on_remove_selected() if self._on_remove_selected else None
         )
 
         # Separator
@@ -120,7 +122,8 @@ class Toolbar(CTkFrame):
             fg_color=theme_color("button.primary"),
             hover_color=theme_color("button.primaryHover"),
             border_width=0,
-            corner_radius=Spacing.BORDER_RADIUS_MD
+            corner_radius=Spacing.BORDER_RADIUS_MD,
+            command=self._trigger_start
         )
 
         # Stop button
@@ -134,7 +137,8 @@ class Toolbar(CTkFrame):
             hover_color=theme_color("button.dangerHover"),
             border_width=0,
             corner_radius=Spacing.BORDER_RADIUS_MD,
-            state="disabled"  # Disabled initially
+            state="disabled",  # Disabled initially
+            command=self._trigger_stop
         )
 
         # Separator
@@ -156,7 +160,8 @@ class Toolbar(CTkFrame):
             fg_color=theme_color("toolbar.foreground"),
             hover_color=theme_color("toolbar.foreground"),
             border_width=0,
-            corner_radius=Spacing.BORDER_RADIUS_SM
+            corner_radius=Spacing.BORDER_RADIUS_SM,
+            command=self._trigger_settings
         )
 
         # Help button
@@ -169,7 +174,8 @@ class Toolbar(CTkFrame):
             fg_color=theme_color("toolbar.foreground"),
             hover_color=theme_color("toolbar.foreground"),
             border_width=0,
-            corner_radius=Spacing.BORDER_RADIUS_SM
+            corner_radius=Spacing.BORDER_RADIUS_SM,
+            command=lambda: self._on_help() if self._on_help else None
         )
 
     def _layout_widgets(self) -> None:
