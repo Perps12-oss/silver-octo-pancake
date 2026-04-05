@@ -323,7 +323,7 @@ class SettingsDialog(CTkToplevel):
         """Build Appearance settings tab."""
         tab = self._tabview.add("Appearance")
 
-        # Theme selection
+        # Theme selection — reads from ThemeEngineV3
         CTkLabel(
             tab,
             text="Theme",
@@ -332,16 +332,23 @@ class SettingsDialog(CTkToplevel):
             anchor="w"
         ).pack(fill="x", padx=Spacing.SM, pady=(Spacing.SM, 0))
 
-        theme_menu = CTkOptionMenu(
+        theme_names = self._get_available_themes()
+        current_theme = self._get_active_theme()
+
+        self._theme_menu = CTkOptionMenu(
             tab,
-            values=["Dark Navy + Cyan", "Dark Gray", "Light Mode"],
-            default_value="Dark Navy + Cyan",
+            values=theme_names if theme_names else ["default"],
             font=Typography.FONT_SM,
-            fg_color=theme_color("base.foreground"),
+            fg_color=theme_color("base.backgroundSecondary"),
             button_color=theme_color("base.backgroundElevated"),
-            dropdown_fg_color=theme_color("base.foreground")
+            dropdown_fg_color=theme_color("base.backgroundSecondary"),
+            command=self._on_theme_changed,
         )
-        theme_menu.pack(fill="x", padx=Spacing.SM, pady=(Spacing.XS, Spacing.MD))
+        if current_theme in theme_names:
+            self._theme_menu.set(current_theme)
+        elif theme_names:
+            self._theme_menu.set(theme_names[0])
+        self._theme_menu.pack(fill="x", padx=Spacing.SM, pady=(Spacing.XS, Spacing.MD))
 
         # Font size
         CTkLabel(
@@ -361,6 +368,38 @@ class SettingsDialog(CTkToplevel):
         )
         font_size_slider.set(self._settings.appearance.get("font_size", 13))
         font_size_slider.pack(fill="x", padx=Spacing.SM, pady=(Spacing.XS, Spacing.MD))
+
+    # ------------------------------------------------------------------
+    # Theme helpers
+    # ------------------------------------------------------------------
+
+    def _get_available_themes(self):
+        """Return sorted list of theme names from ThemeEngineV3."""
+        try:
+            from cerebro.core.theme_engine_v3 import ThemeEngineV3
+            return sorted(ThemeEngineV3.get().all_theme_names())
+        except Exception:
+            return ["dark", "light"]
+
+    def _get_active_theme(self) -> str:
+        """Return the currently active theme name."""
+        try:
+            from cerebro.core.theme_engine_v3 import ThemeEngineV3
+            return ThemeEngineV3.get().active_theme_name
+        except Exception:
+            return ""
+
+    def _on_theme_changed(self, theme_name: str) -> None:
+        """Apply theme immediately when selected from the dropdown."""
+        try:
+            from cerebro.core.theme_engine_v3 import ThemeEngineV3
+            ThemeEngineV3.get().set_theme(theme_name)
+            from cerebro.v2.core.theme_bridge_v2 import set_ctk_appearance_mode
+            set_ctk_appearance_mode()
+            # Persist selection
+            self._settings.appearance["theme"] = theme_name
+        except Exception:
+            pass
 
     def _build_performance_tab(self) -> None:
         """Build Performance settings tab."""

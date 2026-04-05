@@ -7,6 +7,7 @@ Handles window lifecycle, panel organization, and keyboard shortcuts.
 
 from __future__ import annotations
 
+import os
 import tkinter as tk
 from typing import Optional, Callable, List, Dict, Any
 from pathlib import Path
@@ -148,6 +149,10 @@ class MainWindow(CTk):
         self._build_selection_bar()
         self._build_preview_panel()
         self._build_status_bar()
+
+        # Post-build setup
+        self.after(100, self._restore_window_state)  # restore after layout settles
+        self.after(200, self._setup_drag_drop)        # DnD after window is mapped
 
     def _build_toolbar(self) -> None:
         """Build and install toolbar."""
@@ -300,6 +305,8 @@ class MainWindow(CTk):
         self.bind("<Control-p>", lambda e: self._toggle_preview_panel())
         self.bind("<Control-P>", lambda e: self._toggle_preview_panel())
         self.bind("<Escape>", lambda e: self._on_escape())
+        # Space = toggle checkbox on focused treeview row
+        self.bind("<space>", self._on_space_toggle)
 
         # Mode shortcuts (1-6)
         self.bind("<Key-1>", lambda e: self._set_mode(1))
@@ -718,17 +725,29 @@ github.com/Perps12-oss/dedup"""
                 break
 
     def _on_mode_changed(self, new_mode: str) -> None:
-        """Handle mode tab change."""
+        """Handle mode tab change — full page-swap: clear results, update UI, reconfigure engine."""
+        if self._scanning:
+            return  # don't switch mid-scan
         self._current_scan_mode = new_mode
-        print(f"Mode changed to: {new_mode}")
 
-        # Update folder panel options
+        # Clear stale results from previous mode
+        self._scan_results.clear()
+        if hasattr(self, '_results_panel') and self._results_panel:
+            self._results_panel.clear()
+
+        # Update left panel scan options for this mode
         if hasattr(self, '_folder_panel') and self._folder_panel:
             self._folder_panel.set_scan_mode(new_mode)
 
-        # Update results panel columns
+        # Update results treeview columns for this mode
         if hasattr(self, '_results_panel') and self._results_panel:
             self._results_panel.set_mode(new_mode)
+
+        # Switch orchestrator to the new engine (if available for this mode)
+        try:
+            self._orchestrator.set_mode(new_mode)
+        except ValueError:
+            pass  # engine not available yet (e.g. videos without FFmpeg)
 
     def _on_auto_mark(self, rule: str) -> None:
         """Handle Auto Mark dropdown selection from toolbar."""
@@ -835,17 +854,18 @@ github.com/Perps12-oss/dedup"""
                 return
 
             # Delete each selected file
+            deleted_paths: List[str] = []
             for file_data in selected_files:
                 file_path = Path(file_data.get("path", ""))
                 try:
                     send2trash(str(file_path))
                     success_count += 1
+                    deleted_paths.append(str(file_path))
                 except Exception as e:
                     failed_files.append((str(file_path), str(e)))
 
-            # Show result
-            from tkinter import messagebox
             if failed_files:
+                from tkinter import messagebox
                 failed_list = "\n".join(f"{f}: {e}" for f, e in failed_files[:5])
                 more = f"\n... and {len(failed_files) - 5} more" if len(failed_files) > 5 else ""
                 messagebox.showwarning(
@@ -853,12 +873,9 @@ github.com/Perps12-oss/dedup"""
                     f"Deleted {success_count}/{len(selected_files)} files.\n\n"
                     f"Failed:\n{failed_list}{more}"
                 )
-            else:
-                messagebox.showinfo(
-                    "Delete Complete",
-                    f"Successfully deleted {success_count} files.\n\n"
-                    f"Reclaimed: {reclaimable_str}"
-                )
+            elif success_count > 0:
+                # Non-blocking undo toast instead of messagebox
+                _UndoToast(self, success_count, reclaimable_str, deleted_paths)
 
             # Remove deleted files from results
             self._remove_deleted_files(selected_files)
@@ -984,8 +1001,93 @@ github.com/Perps12-oss/dedup"""
 
     def _on_configure(self, event) -> None:
         """Handle window resize."""
-        # Can be used for responsive layout adjustments
         pass
+
+    def _on_space_toggle(self, event) -> None:
+        """Space bar: toggle the checkbox on the currently focused treeview row."""
+        try:
+            tv = self._results_panel._treeview
+            focused = tv.focus()
+            if focused and focused not in tv._group_rows:
+                tv.toggle_check(focused)
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # Drag-and-drop support (tkinterdnd2 optional)
+    # ------------------------------------------------------------------
+
+    def _setup_drag_drop(self) -> None:
+        """Register this window as a folder drop target (tkinterdnd2 optional)."""
+        try:
+            # tkinterdnd2 patches Tk/CTk with DnD support
+            self.drop_target_register("DND_Files")
+            self.dnd_bind("<<Drop>>", self._on_dnd_drop)
+        except Exception:
+            pass  # library not installed — silent fallback
+
+    def _on_dnd_drop(self, event) -> None:
+        """Handle files/folders dropped onto the window."""
+        raw = event.data
+        # tkinterdnd2 delivers paths space-separated or {braced}
+        import re
+        paths = re.findall(r'\{([^}]+)\}|(\S+)', raw)
+        for braced, plain in paths:
+            p = Path(braced or plain)
+            if p.is_dir():
+                self._on_add_path_explicit(p)
+
+    def _on_add_path_explicit(self, path: Path) -> None:
+        """Add a specific folder path (used by drag-drop and getting-started)."""
+        try:
+            self._folder_panel.set_scan_folders(
+                list(dict.fromkeys(self._folder_panel.get_scan_folders() + [path]))
+            )
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # Window state persistence
+    # ------------------------------------------------------------------
+
+    _STATE_FILE = Path.home() / ".cerebro" / "window_state.json"
+
+    def _save_window_state(self) -> None:
+        """Persist window geometry and last-used folders."""
+        import json
+        state = {
+            "geometry": self.geometry(),
+            "folders": [str(f) for f in self._folder_panel.get_scan_folders()],
+            "mode": self._current_scan_mode,
+        }
+        try:
+            self._STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            self._STATE_FILE.write_text(json.dumps(state, indent=2))
+        except Exception:
+            pass
+
+    def _restore_window_state(self) -> None:
+        """Restore last window geometry and folders if state file exists."""
+        import json
+        try:
+            if not self._STATE_FILE.exists():
+                return
+            state = json.loads(self._STATE_FILE.read_text())
+            geo = state.get("geometry")
+            if geo:
+                self.geometry(geo)
+            folders = [Path(f) for f in state.get("folders", []) if Path(f).is_dir()]
+            if folders:
+                self._folder_panel.set_scan_folders(folders)
+            mode = state.get("mode")
+            if mode:
+                try:
+                    self._mode_tabs.set_mode(mode)
+                    self._current_scan_mode = mode
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _apply_theme(self) -> None:
         """Apply current theme colors to all themed widgets."""
@@ -998,9 +1100,10 @@ github.com/Perps12-oss/dedup"""
             pass
 
     def _on_close(self) -> None:
-        """Handle window close event."""
-        print("Closing application...")
-        # TODO: Save window state, clean up resources
+        """Handle window close — save state then quit."""
+        self._save_window_state()
+        if self._scanning:
+            self._orchestrator.cancel()
         self.quit()
 
     # ===================
@@ -1064,6 +1167,116 @@ def run_app() -> None:
 
 if __name__ == "__main__":
     run_app()
+
+
+# =============================================================================
+# Undo Toast — non-blocking notification after send2trash
+# =============================================================================
+
+class _UndoToast:
+    """
+    Floating toast that appears at the bottom-right of the parent window
+    after files are moved to the Recycle Bin.
+
+    Dismisses automatically after TIMEOUT_S seconds or when the user
+    clicks Undo (which attempts OS-level restore from Trash).
+    """
+
+    TIMEOUT_S = 30
+    BG = "#1e2430"
+    FG = "#e0e0e0"
+    ACCENT = "#4fc3f7"
+
+    def __init__(self, parent: tk.Wm, count: int, size_str: str,
+                 deleted_paths: List[str]) -> None:
+        self._parent = parent
+        self._deleted = deleted_paths
+        self._after_id = None
+
+        self._win = tk.Toplevel(parent)
+        self._win.overrideredirect(True)
+        self._win.attributes("-topmost", True)
+        try:
+            self._win.attributes("-alpha", 0.95)
+        except Exception:
+            pass
+
+        # Content
+        frame = tk.Frame(self._win, bg=self.BG, padx=14, pady=10)
+        frame.pack(fill="both")
+
+        tk.Label(
+            frame,
+            text=f"🗑  {count} file{'s' if count != 1 else ''} moved to Recycle Bin  ({size_str})",
+            bg=self.BG, fg=self.FG,
+            font=("", 10),
+        ).pack(side="left", padx=(0, 16))
+
+        tk.Button(
+            frame, text="Undo", bg=self.ACCENT, fg="#000",
+            relief="flat", padx=8, pady=2, font=("", 10, "bold"),
+            cursor="hand2",
+            command=self._undo,
+        ).pack(side="left")
+
+        tk.Button(
+            frame, text="✕", bg=self.BG, fg=self.FG,
+            relief="flat", padx=6, font=("", 10),
+            cursor="hand2",
+            command=self._dismiss,
+        ).pack(side="left", padx=(8, 0))
+
+        # Position: bottom-right of parent
+        self._win.update_idletasks()
+        px = parent.winfo_rootx() + parent.winfo_width()  - self._win.winfo_width() - 24
+        py = parent.winfo_rooty() + parent.winfo_height() - self._win.winfo_height() - 40
+        self._win.geometry(f"+{px}+{py}")
+
+        # Auto-dismiss
+        self._after_id = parent.after(self.TIMEOUT_S * 1000, self._dismiss)
+
+    def _dismiss(self) -> None:
+        try:
+            if self._after_id:
+                self._parent.after_cancel(self._after_id)
+            self._win.destroy()
+        except Exception:
+            pass
+
+    def _undo(self) -> None:
+        """Attempt to restore trashed files from the platform Recycle Bin."""
+        import sys, subprocess
+        restored = 0
+        if sys.platform == "win32":
+            # On Windows, open the Recycle Bin so the user can restore manually
+            try:
+                subprocess.Popen("explorer.exe shell:RecycleBinFolder")
+                restored = -1  # sentinel = opened folder, not auto-restored
+            except Exception:
+                pass
+        elif sys.platform == "darwin":
+            try:
+                subprocess.Popen(["open", os.path.expanduser("~/.Trash")])
+                restored = -1
+            except Exception:
+                pass
+        else:
+            # Linux/XDG: try trash-restore or open file manager
+            try:
+                trash_dir = Path.home() / ".local" / "share" / "Trash" / "files"
+                subprocess.Popen(["xdg-open", str(trash_dir)])
+                restored = -1
+            except Exception:
+                pass
+
+        if restored == -1:
+            from tkinter import messagebox
+            messagebox.showinfo(
+                "Undo",
+                "The Recycle Bin has been opened.\n"
+                "Select the files and choose 'Restore' to recover them.",
+            )
+        self._dismiss()
 
 
 # Simple logger fallback
