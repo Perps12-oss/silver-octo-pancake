@@ -20,9 +20,7 @@ from dataclasses import dataclass
 from enum import Enum, IntEnum
 from functools import partial
 from pathlib import Path
-from PySide6.QtCore import QItemSelectionModel
 from typing import Any, Dict, List, Optional, Set, Tuple
-from PySide6.QtCore import QItemSelectionModel
 from PySide6.QtCore import (
     Qt, QSize, QRect, QPoint, QEvent, QTimer, Signal, Slot,
     QRunnable, QThreadPool, QObject, QMutex, QMutexLocker,
@@ -97,6 +95,14 @@ def format_bytes(num_bytes: int) -> str:
         value /= BYTES_PER_UNIT
         unit_index += 1
     return f"{value:.2f} {SIZE_UNIT_LABELS[unit_index]}"
+
+def _norm_path(p):
+    from pathlib import Path
+    return str(Path(p).resolve())
+
+def _compute_group_size(paths):
+    import os
+    return sum(os.path.getsize(p) for p in paths if os.path.exists(p))
 
 def truncate_text(text: str, max_len: int, ellipsis: str = "...") -> str:
     if not text:
@@ -950,19 +956,6 @@ class ReviewPage(BaseStation):
         self.status_bar = self._build_status_bar()
         root.addWidget(self.status_bar)
 
-        self._scaffold.set_content(content_wrapper)
-
-        self._sticky = StickyActionBar()
-        self._sticky.set_summary("Select files to delete, then press Delete", "")
-        self._sticky.set_primary_text("🗑️ Delete Selected (0)")
-        self._sticky.set_primary_enabled(False)
-        self._sticky.set_secondary_text("Export List")
-        self._sticky.primary_clicked.connect(self._open_ceremony)
-        self._sticky.secondary_clicked.connect(self._on_export_list)
-        self._scaffold.set_sticky_action(self._sticky)
-
-        root.addWidget(self._scaffold, 1)
-
         # Floating delete button (Gemini teal accent style)
         self.floating_delete = FloatingDeleteButton(self)
         self.floating_delete.clicked_with_count.connect(self._on_floating_delete_clicked)
@@ -1467,6 +1460,8 @@ class ReviewPage(BaseStation):
             for p in group.paths:
                 keep_map[p] = True
 
+        self._keep_states[group_id] = keep_map
+
         self._update_display()
         self._update_stats()
 
@@ -1673,6 +1668,12 @@ class ReviewPage(BaseStation):
 
     def _on_cleanup_cancelled(self):
         self._bus.notify("Cleanup Cancelled", "File deletion was cancelled", 2000)
+
+    def _on_export_list(self):
+        pass
+
+    def _refresh_delete_button(self):
+        self._update_stats()
 
     def refresh_after_deletion(self, deleted_paths) -> None:
         """

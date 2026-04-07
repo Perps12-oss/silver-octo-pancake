@@ -48,7 +48,7 @@ def _normalize(s: str) -> str:
 
 def _similarity_ratio(a: str, b: str) -> float:
     if not a and not b:
-        return 1.0
+        return 0.0
     if not a or not b:
         return 0.0
     return SequenceMatcher(None, _normalize(a), _normalize(b)).ratio()

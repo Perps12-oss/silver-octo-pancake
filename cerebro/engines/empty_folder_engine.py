@@ -53,7 +53,7 @@ def _collect_empty_roots(base: Path, protected: Set[Path]) -> List[Path]:
         for root, dirs, files in os.walk(base, topdown=False):
             p = Path(root)
             # Skip protected paths and children already covered
-            if any(str(p).startswith(str(pr)) for pr in protected):
+            if any(p == pr or str(p).startswith(str(pr) + os.sep) for pr in protected):
                 continue
             if p in covered:
                 continue
@@ -65,6 +65,12 @@ def _collect_empty_roots(base: Path, protected: Set[Path]) -> List[Path]:
                 # Mark all children as covered
                 for sub_root, _, _ in os.walk(p):
                     covered.add(Path(sub_root))
+                # Mark all ancestors (up to but not including base) as covered
+                # so they aren't reported again as empty roots
+                ancestor = p.parent
+                while ancestor != base and ancestor != ancestor.parent:
+                    covered.add(ancestor)
+                    ancestor = ancestor.parent
     except PermissionError:
         pass
 

@@ -4,6 +4,7 @@ import json
 import yaml
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union
+import dataclasses as _dc
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 import sys
@@ -64,7 +65,8 @@ class PathFilter:
         """Create from dictionary."""
         if not isinstance(data, dict):
             data = {}
-        return cls(**data)
+        valid = {f.name for f in _dc.fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in valid})
 
 
 @dataclass
@@ -84,7 +86,8 @@ class PerformanceSettings:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'PerformanceSettings':
         """Create from dictionary."""
-        return cls(**data)
+        valid = {f.name for f in _dc.fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in valid})
 
 
 @dataclass
@@ -108,7 +111,8 @@ class UISettings:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'UISettings':
         """Create from dictionary."""
-        return cls(**data)
+        valid = {f.name for f in _dc.fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in valid})
 
 
 @dataclass
@@ -138,7 +142,8 @@ class ScanSettings:
         filters_data = data.pop('default_filters', {})
         if not isinstance(filters_data, dict):
             filters_data = {}
-        instance = cls(**data)
+        valid = {f.name for f in _dc.fields(cls)}
+        instance = cls(**{k: v for k, v in data.items() if k in valid})
         instance.default_filters = PathFilter.from_dict(filters_data)
         return instance
 
@@ -162,7 +167,8 @@ class NotificationSettings:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'NotificationSettings':
         """Create from dictionary."""
-        return cls(**data)
+        valid = {f.name for f in _dc.fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in valid})
 
 
 @dataclass
@@ -187,7 +193,8 @@ class UpdateSettings:
         last_check_str = data.pop('last_check_time', None)
         if last_check_str:
             data['last_check_time'] = datetime.fromisoformat(last_check_str)
-        return cls(**data)
+        valid = {f.name for f in _dc.fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in valid})
 
 
 @dataclass
@@ -209,7 +216,8 @@ class BackupSettings:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'BackupSettings':
         """Create from dictionary."""
-        return cls(**data)
+        valid = {f.name for f in _dc.fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in valid})
 
 
 @dataclass
@@ -291,8 +299,9 @@ class AppConfig:
         state_hex = data.pop('window_state', None)
         
         # Create instance
-        instance = cls(**data)
-        
+        valid = {f.name for f in _dc.fields(cls)}
+        instance = cls(**{k: v for k, v in data.items() if k in valid})
+
         # Set nested dataclasses
         instance.ui = UISettings.from_dict(ui_data)
         instance.scan = ScanSettings.from_dict(scan_data)

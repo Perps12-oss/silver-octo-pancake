@@ -852,6 +852,7 @@ github.com/Perps12-oss/dedup"""
 
             # Clear selection
             self._on_deselect_all()
+            self._toolbar.set_has_selection(False)
 
             # Update status bar reclaimable
             new_reclaimable = self._results_panel.get_reclaimable_space()
