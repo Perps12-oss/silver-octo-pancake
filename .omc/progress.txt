@@ -1,0 +1,23 @@
+# CEREBRO v2 UI Overhaul - Progress Log
+# Started: 2026-04-04
+
+## Branch: cerebro-v2-ui-overhaul
+
+## Current State Analysis
+- Existing PRD was for Scale Foundation project
+- Created new PRD for UI overhaul with 10 initial stories
+- Branch: cerebro-v2-ui-overhaul already existed, switched to it
+
+## Key Issues Identified
+1. Delete uses path.unlink() instead of send2trash (CRITICAL)
+2. Results panel shows placeholder text, no actual treeview (CRITICAL)
+3. Toolbar has icon-only buttons, needs text labels (HIGH)
+4. Selection bar is separate strip, should be toolbar dropdown (HIGH)
+5. Mode tabs are flat segmented button, need icons (HIGH)
+
+## Next Phase: Phase A - Critical Bugs
+Priority order:
+1. UI-A1: Wire Delete to send2trash
+2. UI-A2: Build CheckTreeview widget
+3. UI-A3: Rewrite toolbar
+4. UI-A4: Wire complete pipeline

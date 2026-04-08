@@ -1,0 +1,276 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1775678998257,
+  "projectRoot": "C:\\Users\\S8633\\OneDrive\\Desktop\\silver-octo-pancake",
+  "techStack": {
+    "languages": [],
+    "frameworks": [],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs",
+      "tests"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "cache": {
+      "path": "cache",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1775678998163,
+      "keyFiles": []
+    },
+    "cerebro": {
+      "path": "cerebro",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1775678998165,
+      "keyFiles": [
+        "__init__.py"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 23,
+      "lastAccessed": 1775678998165,
+      "keyFiles": [
+        "Cerebro_v2_Governance_Protocol L.txt",
+        "Cerebro_v2_Phase_Tracker.txt",
+        "Cerebro_v2_Ultimate_ValidatorTTT.txt",
+        "Cerebro_v2_Ultimate_ValidatorTTTYUYU.txt",
+        "Cerebro_v2_Ultimate_ValidatorTTTYUYUIOUIOIUIOO.txt"
+      ]
+    },
+    "logs": {
+      "path": "logs",
+      "purpose": null,
+      "fileCount": 134,
+      "lastAccessed": 1775678998166,
+      "keyFiles": [
+        "cerebro.log",
+        "cerebro_2026-02-10_19-30-19.log",
+        "cerebro_2026-02-10_21-18-45.log",
+        "cerebro_2026-02-10_22-03-34.log",
+        "cerebro_2026-02-11_00-10-37.log"
+      ]
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 0,
+      "lastAccessed": 1775678998166,
+      "keyFiles": []
+    },
+    "themes": {
+      "path": "themes",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1775678998167,
+      "keyFiles": []
+    },
+    "__pycache__": {
+      "path": "__pycache__",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1775678998167,
+      "keyFiles": [
+        "main.cpython-314.pyc",
+        "main_window.cpython-311.pyc"
+      ]
+    },
+    "cerebro\\controllers": {
+      "path": "cerebro\\controllers",
+      "purpose": "Controllers",
+      "fileCount": 0,
+      "lastAccessed": 1775678998168,
+      "keyFiles": []
+    },
+    "cerebro\\services": {
+      "path": "cerebro\\services",
+      "purpose": "Business logic services",
+      "fileCount": 9,
+      "lastAccessed": 1775678998168,
+      "keyFiles": [
+        "cache_manager.py",
+        "config.py",
+        "hash_cache.py"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "cerebro\\ui\\components\\scanning_state_panel.py",
+      "accessCount": 6,
+      "lastAccessed": 1775679021481,
+      "type": "file"
+    },
+    {
+      "path": "cerebro\\workers\\fast_scan_worker.py",
+      "accessCount": 6,
+      "lastAccessed": 1775679547074,
+      "type": "file"
+    },
+    {
+      "path": "cerebro\\ui\\pages\\scan_page.py",
+      "accessCount": 4,
+      "lastAccessed": 1775679311456,
+      "type": "file"
+    },
+    {
+      "path": "cerebro\\engines\\image_dedup_engine.py",
+      "accessCount": 3,
+      "lastAccessed": 1775678065367,
+      "type": "file"
+    },
+    {
+      "path": "cerebro\\ui\\components\\collapsible_sidebar.py",
+      "accessCount": 3,
+      "lastAccessed": 1775678762703,
+      "type": "file"
+    },
+    {
+      "path": "Cerebro_v2_Phase_Tracker.txt",
+      "accessCount": 3,
+      "lastAccessed": 1775679192196,
+      "type": "directory"
+    },
+    {
+      "path": "cerebro\\ui\\components\\tabbed_folder_panel.py",
+      "accessCount": 2,
+      "lastAccessed": 1775678562333,
+      "type": "file"
+    },
+    {
+      "path": "cerebro\\ui\\components\\empty_state_panel.py",
+      "accessCount": 2,
+      "lastAccessed": 1775678652596,
+      "type": "file"
+    },
+    {
+      "path": "test_scanning_state_panel.py",
+      "accessCount": 2,
+      "lastAccessed": 1775679065167,
+      "type": "file"
+    },
+    {
+      "path": "cerebro\\ui\\main_window.py",
+      "accessCount": 2,
+      "lastAccessed": 1775679290540,
+      "type": "file"
+    },
+    {
+      "path": "cerebro\\ui\\controllers\\live_scan_controller.py",
+      "accessCount": 2,
+      "lastAccessed": 1775679448938,
+      "type": "file"
+    },
+    {
+      "path": "cerebro\\engines\\video_dedup_engine.py",
+      "accessCount": 2,
+      "lastAccessed": 1775679559145,
+      "type": "file"
+    },
+    {
+      "path": "cerebro\\engines\\music_dedup_engine.py",
+      "accessCount": 1,
+      "lastAccessed": 1775678127432,
+      "type": "file"
+    },
+    {
+      "path": "cerebro\\engines\\empty_folder_engine.py",
+      "accessCount": 1,
+      "lastAccessed": 1775678157663,
+      "type": "file"
+    },
+    {
+      "path": "cerebro\\ui\\components\\modern\\sidebar_nav.py",
+      "accessCount": 1,
+      "lastAccessed": 1775678388113,
+      "type": "file"
+    },
+    {
+      "path": "cerebro\\ui\\components\\modern\\folder_picker.py",
+      "accessCount": 1,
+      "lastAccessed": 1775678416161,
+      "type": "file"
+    },
+    {
+      "path": "Cerebro_v2_Governance_Protocol L.txt",
+      "accessCount": 1,
+      "lastAccessed": 1775679149435,
+      "type": "file"
+    },
+    {
+      "path": "",
+      "accessCount": 1,
+      "lastAccessed": 1775679244331,
+      "type": "directory"
+    },
+    {
+      "path": "cerebro\\engines\\orchestrator.py",
+      "accessCount": 1,
+      "lastAccessed": 1775679287736,
+      "type": "file"
+    },
+    {
+      "path": "cerebro",
+      "accessCount": 1,
+      "lastAccessed": 1775679355333,
+      "type": "directory"
+    },
+    {
+      "path": "cerebro\\ui",
+      "accessCount": 1,
+      "lastAccessed": 1775679365494,
+      "type": "directory"
+    },
+    {
+      "path": "main.py",
+      "accessCount": 1,
+      "lastAccessed": 1775679425254,
+      "type": "file"
+    },
+    {
+      "path": "cerebro\\v2\\ui\\main_window.py",
+      "accessCount": 1,
+      "lastAccessed": 1775679460386,
+      "type": "file"
+    },
+    {
+      "path": "cerebro\\core\\fast_pipeline.py",
+      "accessCount": 1,
+      "lastAccessed": 1775679476151,
+      "type": "file"
+    },
+    {
+      "path": "cerebro\\workers\\media_scan_worker.py",
+      "accessCount": 1,
+      "lastAccessed": 1775679612985,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

@@ -1,0 +1,17 @@
+Features Lost During Plan Restructuring				
+These features were identified in the original research or early plans but dropped during the v1?v2?v3 restructuring				
+				
+Feature	Where It Was	Where It Got Lost	Should It Come Back?	Suggested Phase
+Dry Run Mode	Original Phase 5 (premium polish)	Dropped when plan restructured from v1 (6 phases) to v2 (7 phases) — premium polish items were deprioritized	YES — standard safety feature	Sprint 4 (R-14)
+Hard Link Replacement	Feature research (Czkawka/dupeGuru comparison)	Never made it into any phase plan — identified in research but not carried forward	YES — user wanted Czkawka features	Sprint 4 (new R-22)
+Background Pre-Scanning	Original Phase 5 (performance polish)	Dropped in v2 restructuring	YES — premium differentiator	Sprint 6 (new R-23)
+Memory-Mapped File Reading (mmap)	Original Phase 5 (performance polish)	Dropped in v2 restructuring	YES — user wanted Czkawka speed	Sprint 3 (new R-24)
+Quarantine Folder Workflow	Feature research (safety best practices)	Never planned — only send2trash was implemented	MAYBE — send2trash covers most cases	Future (low priority)
+EXIF Timestamp Photo Grouping	Feature research (media-aware Tier 2)	Never made it to a phase — part of original feature map but not carried forward	MAYBE — useful for photographers	Future (low priority)
+Video Duplicate Finder (perceptual video hash)	Feature research (Video Duplicate Finder tool)	"Video dedup via frame extraction was planned, but the dedicated videohash2 library approach was not finalized"	YES — already in Sprint 3 (R-09)	Sprint 3 (R-09)
+Bad File Extension Detection	Feature research (Czkawka system cleanup)	Never made it to a phase — Czkawka utility that was in Tier 3 research	NO — user only wanted Empty Folders + Large Files	Not needed
+Broken/Corrupt File Scanning	Feature research (Czkawka system cleanup)	Never made it to a phase	NO — user only wanted Empty Folders + Large Files	Not needed
+Temporary/Cache File Cleanup	Feature research (Czkawka system cleanup)	Never made it to a phase	NO — user only wanted Empty Folders + Large Files	Not needed
+Broken Symlink Detection	Feature research (Czkawka system cleanup)	Never made it to a phase	NO — Windows-focused app	Not needed
+Cloud Scanning (Google Drive/Dropbox)	Feature research (Ashisoft)	"Explicitly excluded by user — 'No, local/external drives only'"	NO — user said no	Not needed
+Export to CSV/HTML/JSON	Feature research (UI/UX winners)	Explicitly excluded by user — 'no need for export only internal metrics'	NO — user said no	Not needed
