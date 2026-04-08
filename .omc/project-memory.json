@@ -1,0 +1,112 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1775431955420,
+  "projectRoot": "C:\\Users\\S8633\\OneDrive\\Desktop\\silver-octo-pancake",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Python",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "requirements.txt"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "pip",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs",
+      "tests"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "cache": {
+      "path": "cache",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1775431955307,
+      "keyFiles": []
+    },
+    "cerebro": {
+      "path": "cerebro",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1775431955308,
+      "keyFiles": [
+        "scan_result_store.py",
+        "__init__.py"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 29,
+      "lastAccessed": 1775431955309,
+      "keyFiles": [
+        "CEREBRO_V6_MASTER_PLAN.md",
+        "CODE_EVALUATION_AND_IMPROVEMENTS.md",
+        "COMPLETE_PACKAGE.md",
+        "EVALUATION_LAST_5_COMMITS.md",
+        "IMPLEMENTATION_COMPLETE.md"
+      ]
+    },
+    "logs": {
+      "path": "logs",
+      "purpose": null,
+      "fileCount": 37,
+      "lastAccessed": 1775431955309,
+      "keyFiles": [
+        "cerebro.log",
+        "cerebro_2026-03-05_23-36-36.log",
+        "cerebro_2026-03-06_05-41-21.log",
+        "cerebro_2026-03-06_06-49-02.log",
+        "cerebro_2026-03-06_06-49-17.log"
+      ]
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 2,
+      "lastAccessed": 1775431955309,
+      "keyFiles": [
+        "test_image_engine.py",
+        "test_integration.py"
+      ]
+    },
+    "cerebro\\controllers": {
+      "path": "cerebro\\controllers",
+      "purpose": "Controllers",
+      "fileCount": 1,
+      "lastAccessed": 1775431955310,
+      "keyFiles": [
+        "__init__.py"
+      ]
+    }
+  },
+  "hotPaths": [],
+  "userDirectives": []
+}

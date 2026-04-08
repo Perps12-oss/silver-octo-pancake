@@ -1,0 +1,165 @@
+{
+  "version": "2.0",
+  "title": "CEREBRO v2 - UI Overhaul",
+  "description": "Complete UI overhaul to match Ashisoft Duplicate File Finder Pro 8.2 with all critical functionality wired.",
+  "created": "2026-04-04T22:30:00Z",
+  "stories": [
+    {
+      "id": "UI-A1",
+      "title": "Wire Delete Selected to send2trash",
+      "priority": 1,
+      "status": "complete",
+      "passes": true,
+      "description": "Currently deletion uses path.unlink() which permanently deletes files. Must use send2trash to send files to Recycle Bin safely.",
+      "acceptanceCriteria": [
+        "send2trash package added to requirements.txt",
+        "main_window.py _on_delete_selected() uses send2trash.send2trash() instead of path.unlink()",
+        "Confirmation dialog shows 'Send to Recycle Bin' messaging",
+        "Error handling shows which files failed to delete",
+        "Deleted files are removed from treeview after successful deletion"
+      ]
+    },
+    {
+      "id": "UI-A2",
+      "title": "Build CheckTreeview widget",
+      "priority": 1,
+      "status": "complete",
+      "passes": true,
+      "description": "Create ttk.Treeview-based widget with checkbox support for displaying grouped duplicate results. Replaces placeholder in results_panel.py",
+      "acceptanceCriteria": [
+        "cerebro/ui/widgets/check_treeview.py exists with CheckTreeview class",
+        "CheckTreeview supports parent/child grouping (group headers + file rows)",
+        "Checkboxes toggle on row click",
+        "Columns: Checkbox, Name, Size, Modified, Similarity %, Path",
+        "Sortable by clicking column headers",
+        "Alternating row colors within groups",
+        "Group headers show: 'Group N — X files, Y MB reclaimable'",
+        "Right-click context menu: Open File, Open Folder, Copy Path, Select Group"
+      ]
+    },
+    {
+      "id": "UI-A3",
+      "title": "Rewrite toolbar with Ashisoft-style buttons",
+      "priority": 1,
+      "status": "complete",
+      "passes": true,
+      "description": "Current toolbar has single-character icon buttons. Ashisoft has labeled buttons with icons grouped by function.",
+      "acceptanceCriteria": [
+        "Toolbar shows: [📁 Add Folders] [✕ Remove] [▶ Search Now] [⏹ Stop]",
+        "Toolbar shows: [📋 Auto Mark ▼] [🗑 Delete] [📦 Move To] [⚙ Settings] [❓ Help]",
+        "Buttons grouped with visual separators (|)",
+        "'Search Now' button has accent color and text label",
+        "'Stop' button hidden until scan starts",
+        "'Delete' button has danger color (red)",
+        "All buttons have tooltips",
+        "Buttons are properly sized with text + icon"
+      ]
+    },
+    {
+      "id": "UI-A4",
+      "title": "Wire folder panel → orchestrator → results pipeline",
+      "priority": 1,
+      "status": "complete",
+      "passes": true,
+      "description": "Complete data flow from folder selection to scan start to results display.",
+      "acceptanceCriteria": [
+        "Folder panel scan folders passed to orchestrator.configure_scan()",
+        "Protected folders passed to orchestrator.configure_scan()",
+        "Scan progress updates status bar during scan",
+        "On scan complete, results populate CheckTreeview",
+        "Empty state shows before scan with 'Add folders and click Search Now'",
+        "Scanning state shows progress bar and current file",
+        "Results state shows grouped duplicates in treeview"
+      ]
+    },
+    {
+      "id": "UI-B1",
+      "title": "Rewrite mode tabs with icons",
+      "priority": 2,
+      "status": "complete",
+      "passes": true,
+      "description": "Mode tabs are currently flat segmented button. Need icon + text, compact, left-aligned.",
+      "acceptanceCriteria": [
+        "Mode tabs show: [📄 Files] [🖼 Photos] [🎬 Videos] [🎵 Music] [📁 Empty Folders] [📊 Large Files]",
+        "Tabs are compact width (not stretched full width)",
+        "Tabs are left-aligned",
+        "Active tab has accent bottom border",
+        "Clicking tab switches entire content area below",
+        "Each tab has its own page layout"
+      ]
+    },
+    {
+      "id": "UI-B2",
+      "title": "Move result filter tabs inside results area",
+      "priority": 2,
+      "status": "complete",
+      "passes": true,
+      "description": "Filter tabs are currently at top level. Should be inside results panel, visible only after scan.",
+      "acceptanceCriteria": [
+        "Filter tabs show inside results_panel.py, not at main level",
+        "Filter tabs are hidden pre-scan, visible post-scan",
+        "Filter tabs show counts: [All (347)] [Images (120)] [Videos (45)] [Audio (89)] [Docs (93)]",
+        "Filtering works without re-scanning"
+      ]
+    },
+    {
+      "id": "UI-C1",
+      "title": "Rewrite left panel as tab-based",
+      "priority": 2,
+      "status": "complete",
+      "passes": true,
+      "description": "Left panel currently has three collapsible sections. Should be tab-based with Folders/Protect tabs.",
+      "acceptanceCriteria": [
+        "Left panel has [📁 Folders] [🛡 Protect] tabs",
+        "Folders tab shows scan folder list with remove buttons",
+        "Folders tab shows scan settings below (Method, Min size, Skip patterns)",
+        "Protect tab shows protected folder list",
+        "No text truncation or cut-off text"
+      ]
+    },
+    {
+      "id": "UI-D1",
+      "title": "Build empty state / getting-started view",
+      "priority": 2,
+      "status": "pending",
+      "passes": false,
+      "description": "Pre-scan view should guide users to add folders and start scanning.",
+      "acceptanceCriteria": [
+        "Empty state shows: 'Add folders and click Search Now to find duplicate files'",
+        "Empty state has large 'Add Folders' button",
+        "Empty state has large 'Search Now' button",
+        "Empty state shows numbered instructions"
+      ]
+    },
+    {
+      "id": "UI-D2",
+      "title": "Build scanning state with progress",
+      "priority": 2,
+      "status": "pending",
+      "passes": false,
+      "description": "During scan, show progress indicator and live file being scanned.",
+      "acceptanceCriteria": [
+        "Scanning state shows progress bar",
+        "Scanning state shows 'Scanning: C:\\Path\\To\\file.ext'",
+        "Live counters: files scanned, duplicates found so far",
+        "Progress bar is animated"
+      ]
+    },
+    {
+      "id": "UI-E1",
+      "title": "Rewrite preview panel (collapsed default)",
+      "priority": 3,
+      "status": "pending",
+      "passes": false,
+      "description": "Preview panel currently takes 50% of screen and shows when empty. Should be compact and collapsed by default.",
+      "acceptanceCriteria": [
+        "Preview panel hidden by default (collapsed)",
+        "Preview panel shows only when file is selected",
+        "When visible, takes ~150px height (images) or ~80px (files)",
+        "Context-sensitive: image preview for images, metadata for files",
+        "Remove 'Keep A' / 'Keep B' buttons",
+        "Resizable by dragging divider"
+      ]
+    }
+  ]
+}
