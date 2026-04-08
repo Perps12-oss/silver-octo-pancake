@@ -12,6 +12,7 @@ Implements BaseEngine interface with multi-stage pipeline:
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import logging
 import os
@@ -200,31 +201,38 @@ class ImageDedupEngine(BaseEngine):
         max_workers = min(32, (os.cpu_count() or 4) * 2)
         self._worker_pool = ThreadPoolExecutor(max_workers=max_workers)
 
+        self._callback = progress_callback
+
         # Start scan thread
         self._scan_thread = threading.Thread(
             target=self._run_scan,
+            args=(progress_callback,),
             daemon=True,
             name=f"ScanThread-photos"
         )
         self._scan_thread.start()
 
-    def _run_scan(self) -> None:
+    def _run_scan(self, cb: Callable[[ScanProgress], None]) -> None:
         """Run scan in a background thread."""
         try:
-            def wrapper_callback(progress: ScanProgress) -> None:
-                """Thread-safe wrapper for progress callback."""
-                if self._progress_callback:
-                    self._progress_callback(progress)
-
-            self._active_engine.start(wrapper_callback)
+            image_files = self._get_image_files()
+            cb(ScanProgress(state=ScanState.SCANNING, files_total=len(image_files)))
+            groups = self._group_images(image_files)
+            self._results = groups if groups else []
+            self._state = ScanState.COMPLETED
+            cb(ScanProgress(
+                state=ScanState.COMPLETED,
+                files_scanned=len(image_files),
+                files_total=len(image_files),
+                groups_found=len(self._results),
+                duplicates_found=sum(len(g.files) - 1 for g in self._results),
+                bytes_reclaimable=sum(g.reclaimable for g in self._results),
+            ))
         except Exception as e:
-            # Report error via progress callback
-            if self._progress_callback:
-                error_progress = ScanProgress(
-                    state=ScanState.ERROR,
-                    current_file=f"Error: {str(e)}"
-                )
-                self._progress_callback(error_progress)
+            cb(ScanProgress(
+                state=ScanState.ERROR,
+                current_file=f"Error: {str(e)}"
+            ))
 
     def _get_image_files(self) -> List[Path]:
         """Get all image files from scan folders, excluding protected."""
@@ -235,7 +243,7 @@ class ImageDedupEngine(BaseEngine):
             try:
                 for item in folder.rglob("*"):
                     if self._cancel_event.is_set():
-                        return
+                        return []
 
                     if item.is_file():
                         path = Path(item)
@@ -248,7 +256,10 @@ class ImageDedupEngine(BaseEngine):
                         # Check extension
                         if path.suffix.lower() in image_ext_lower:
                             # Check resolution filter
-                            width, height = self._get_image_resolution(path)
+                            result = self._get_image_resolution(path)
+                            if result is None:
+                                continue
+                            width, height = result
                             if self._passes_resolution_filter(width, height):
                                 image_files.append(path)
 
@@ -331,7 +342,7 @@ class ImageDedupEngine(BaseEngine):
 
         for image_path in image_files:
             if self._cancel_event.is_set():
-                return
+                return []
 
             processed += 1
 
@@ -339,11 +350,12 @@ class ImageDedupEngine(BaseEngine):
             mtime = image_path.stat().st_mtime
             size = image_path.stat().st_size
 
-            cached_phash = self._cache.get(image_path, mtime, size, "phash")
-            if cached_phash:
-                hash_map[cached_phash] = hash_map.get(cached_phash, []) + [image_path]
-                cache_hits += 1
-                continue
+            if self._cache:
+                cached_phash = self._cache.get(image_path, mtime, size, "phash")
+                if cached_phash:
+                    hash_map[cached_phash] = hash_map.get(cached_phash, []) + [image_path]
+                    cache_hits += 1
+                    continue
 
             cache_misses += 1
 
@@ -374,9 +386,8 @@ class ImageDedupEngine(BaseEngine):
             self._progress.current_file = str(image_path)
 
             if processed % 100 == 0:
-                self._progress.percent = (processed / total_files) * 100
-                if self._progress_callback:
-                    self._progress_callback(self._progress.clone())
+                if self._callback:
+                    self._callback(dataclasses.replace(self._progress))
 
         # Create duplicate groups
         groups = []

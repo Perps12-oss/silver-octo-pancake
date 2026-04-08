@@ -1,6 +1,7 @@
 # cerebro/services/update_checker.py
 
 import json
+import os
 import urllib.request
 import urllib.error
 from datetime import datetime, timedelta
@@ -377,9 +378,10 @@ class UpdateChecker(QObject):
             )
             
             # Verify checksum
-            if update_info.checksum:
-                if not self._verify_checksum(download_path, update_info):
-                    raise ValueError("Checksum verification failed")
+            if not update_info.checksum:
+                raise ValueError("Update rejected: missing checksum — cannot verify integrity")
+            if not self._verify_checksum(download_path, update_info):
+                raise ValueError("Checksum verification failed")
                     
             # Update status
             self.status.download_status = "downloaded"
@@ -450,6 +452,10 @@ class UpdateChecker(QObject):
             self.signals.install_progress.emit(10.0, "Extracting update...")
             
             with zipfile.ZipFile(update_path, 'r') as zip_ref:
+                for member in zip_ref.namelist():
+                    member_path = os.path.realpath(os.path.join(temp_dir, member))
+                    if not member_path.startswith(os.path.realpath(temp_dir) + os.sep) and member_path != os.path.realpath(temp_dir):
+                        raise ValueError(f"Zip path traversal detected: {member}")
                 zip_ref.extractall(temp_dir)
                 
             self.signals.install_progress.emit(30.0, "Verifying files...")
@@ -510,7 +516,12 @@ class UpdateChecker(QObject):
         for i, file_info in enumerate(files_to_copy):
             src = temp_dir / file_info['source']
             dst = install_dir / file_info['destination']
-            
+
+            real_dst = os.path.realpath(dst)
+            real_install = os.path.realpath(install_dir)
+            if not real_dst.startswith(real_install + os.sep):
+                raise ValueError(f"install.json path traversal: {file_info['destination']}")
+
             # Create destination directory if needed
             dst.parent.mkdir(parents=True, exist_ok=True)
             
