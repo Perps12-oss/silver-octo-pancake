@@ -431,13 +431,18 @@ class ImageDedupEngine(BaseEngine):
         if len(hash1) != len(hash2):
             return 64  # Maximum possible distance
 
-        # XOR each corresponding byte
-        distance = 0
-        for c1, c2 in zip(hash1, hash2):
-            if c1 != c2:
-                distance += 1
+        # Convert hex strings to integers and XOR to find differing bits
+        try:
+            int1 = int(hash1, 16)
+            int2 = int(hash2, 16)
+            xor_result = int1 ^ int2
 
-        return distance
+            # Count the number of set bits in the XOR result
+            distance = bin(xor_result).count('1')
+            return distance
+        except ValueError:
+            # Fallback for malformed hashes
+            return 64
 
     def pause(self) -> None:
         """Pause the current scan."""
