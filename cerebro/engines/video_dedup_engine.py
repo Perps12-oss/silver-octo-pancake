@@ -305,9 +305,12 @@ class VideoDedupEngine(BaseEngine):
             for p in group:
                 try:
                     stat = p.stat()
+                    sig = signatures.get(p)
+                    dur = sig[0] if sig else 0.0
                     files.append(DuplicateFile(
                         path=p, size=stat.st_size, modified=stat.st_mtime,
                         extension=p.suffix.lower(), similarity=threshold,
+                        metadata={"duration": dur},
                     ))
                 except OSError:
                     pass

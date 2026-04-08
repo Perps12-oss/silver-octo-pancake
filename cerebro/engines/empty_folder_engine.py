@@ -173,10 +173,18 @@ class EmptyFolderEngine(BaseEngine):
         for gid, ep in enumerate(all_empty):
             try:
                 stat = ep.stat()
+                # Compute depth relative to the deepest matching scan root
+                depth = 0
+                for base in self._folders:
+                    try:
+                        depth = len(ep.relative_to(base).parts)
+                        break
+                    except ValueError:
+                        continue
                 df = DuplicateFile(
                     path=ep, size=0, modified=stat.st_mtime,
                     extension="<dir>", similarity=1.0,
-                    metadata={"type": "empty_folder"},
+                    metadata={"type": "empty_folder", "depth": depth},
                 )
                 df.is_keeper = False
                 dg = DuplicateGroup(group_id=gid, files=[df])

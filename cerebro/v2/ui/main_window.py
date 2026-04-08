@@ -35,7 +35,7 @@ from cerebro.v2.ui.mode_tabs import ModeTabs
 from cerebro.v2.ui.status_bar import StatusBar, StatusBarMetrics
 from cerebro.v2.ui.settings_dialog import SettingsDialog, Settings
 from cerebro.v2.ui.folder_panel import FolderPanel
-from cerebro.v2.ui.results_panel import ResultsPanel, DuplicateGroup as ResultsDuplicateGroup
+from cerebro.v2.ui.results_panel import ResultsPanel
 from cerebro.v2.ui.preview_panel import PreviewPanel
 from cerebro.engines.orchestrator import ScanOrchestrator
 from cerebro.engines.base_engine import (
@@ -581,48 +581,15 @@ class MainWindow(CTk):
 
     def _load_results_to_panel(self) -> None:
         """Load scan results into the results panel."""
-        # Transform core.DuplicateGroup to results panel format
-        results_groups = self._transform_results(self._scan_results)
-        self._results_panel.load_results(results_groups)
-
-    def _transform_results(self, core_groups: List[DuplicateGroup]) -> List[ResultsDuplicateGroup]:
-        """
-        Transform core.DuplicateGroup to results panel format.
-
-        Args:
-            core_groups: List of core.DuplicateGroup objects from engine.
-
-        Returns:
-            List of results panel DuplicateGroup objects.
-        """
-        results_groups = []
-
-        for core_group in core_groups:
-            # Transform files
-            files_list = []
-            for file_obj in core_group.files:
-                files_list.append({
-                    "path": str(file_obj.path),
-                    "size": file_obj.size,
-                    "modified": file_obj.modified,
-                    "similarity": file_obj.similarity,
-                    "checked": False,  # Will be marked by selection rule
-                    "extension": file_obj.extension or Path(file_obj.path).suffix.lower()
-                })
-
-            # Create results panel group
-            total_size = sum(f["size"] for f in files_list)
-            reclaimable = total_size - max(f["size"] for f in files_list) if files_list else 0
-
-            results_group = ResultsDuplicateGroup(
-                group_id=core_group.group_id,
-                files=files_list,
-                total_size=total_size,
-                reclaimable=reclaimable
+        # Pass core DuplicateGroup objects directly — results_panel uses DuplicateFile attributes.
+        # For large_files mode, provide total scanned bytes so the panel can show % of disk.
+        from cerebro.v2.ui.mode_tabs import ScanMode
+        if self._current_scan_mode == ScanMode.LARGE_FILES:
+            total_bytes = sum(
+                f.size for g in self._scan_results for f in g.files
             )
-            results_groups.append(results_group)
-
-        return results_groups
+            self._results_panel._total_scan_bytes = total_bytes
+        self._results_panel.load_results(self._scan_results)
 
     def _format_bytes(self, bytes_count: int) -> str:
         """Format bytes to human-readable string."""
@@ -750,6 +717,20 @@ class MainWindow(CTk):
             self._orchestrator.set_mode(new_mode)
         except ValueError:
             pass  # engine not available yet (e.g. videos without FFmpeg)
+
+        # Show FFmpeg missing warning when switching to Videos mode
+        from cerebro.v2.ui.mode_tabs import ScanMode
+        if new_mode == ScanMode.VIDEOS:
+            try:
+                from cerebro.engines.video_dedup_engine import VideoDedupEngine
+                engine = self._orchestrator._engines.get("videos")
+                ffmpeg_missing = isinstance(engine, VideoDedupEngine) and not engine._ffmpeg
+            except Exception:
+                ffmpeg_missing = False
+            self._results_panel.show_ffmpeg_warning(ffmpeg_missing)
+        else:
+            if hasattr(self._results_panel, "_ffmpeg_banner"):
+                self._results_panel.show_ffmpeg_warning(False)
 
     def _on_auto_mark(self, rule: str) -> None:
         """Handle Auto Mark dropdown selection from toolbar."""

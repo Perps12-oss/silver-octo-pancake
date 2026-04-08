@@ -111,10 +111,12 @@ class ResultsPanel(CTkFrame):
 
         # State
         self._current_filter: str = FilterType.ALL
+        self._current_mode: str = "files"
         self._groups: List[DuplicateGroup] = []
         self._filtered_groups: List[DuplicateGroup] = []
         self._total_items: int = 0
         self._selected_count: int = 0
+        self._total_scan_bytes: int = 0  # used for large_files % display
 
         # Widgets
         self._filter_bar: Optional[_FilterBar] = None
@@ -636,15 +638,10 @@ class ResultsPanel(CTkFrame):
                 is_keeper = (i == group.get_keeper_index()) or file_data.is_keeper
                 checked = not is_keeper
 
-                # Format values
+                # Format values — mode-aware
                 path = Path(file_data.path)
-                values = (
-                    path.name,
-                    path.suffix,
-                    self._format_bytes(file_data.size),
-                    self._format_date(file_data.modified),
-                    f"{int(file_data.similarity * 100)}%"
-                )
+                meta = file_data.metadata if hasattr(file_data, "metadata") and file_data.metadata else {}
+                values = self._format_row(path, file_data, meta)
 
                 tags = []
                 if is_keeper:
@@ -657,6 +654,71 @@ class ResultsPanel(CTkFrame):
                     values=values,
                     tags=tuple(tags) if tags else ()
                 )
+
+    def _format_row(self, path: Path, file_data, meta: dict) -> tuple:
+        """Return treeview column values for the current scan mode."""
+        from cerebro.v2.ui.mode_tabs import ScanMode
+        mode = self._current_mode
+
+        def _fmt_dur(seconds: float) -> str:
+            if not seconds:
+                return "—"
+            m, s = divmod(int(seconds), 60)
+            h, m = divmod(m, 60)
+            return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+        if mode == ScanMode.VIDEOS:
+            return (
+                path.name,
+                path.suffix.lstrip(".").upper() or "—",
+                self._format_bytes(file_data.size),
+                _fmt_dur(meta.get("duration", 0)),
+                meta.get("resolution", "—"),
+                f"{int(file_data.similarity * 100)}%",
+            )
+        elif mode == ScanMode.MUSIC:
+            return (
+                path.name,
+                meta.get("artist", "—") or "—",
+                meta.get("album", "—") or "—",
+                _fmt_dur(meta.get("duration", 0)),
+                self._format_bytes(file_data.size),
+                f"{int(file_data.similarity * 100)}%",
+            )
+        elif mode == ScanMode.EMPTY_FOLDERS:
+            return (
+                path.name,
+                str(path.parent),
+                str(meta.get("depth", "—")),
+                "—",
+            )
+        elif mode == ScanMode.LARGE_FILES:
+            total = self._total_scan_bytes or file_data.size or 1
+            pct = f"{file_data.size / total * 100:.1f}%" if total else "—"
+            return (
+                path.name,
+                path.suffix.lstrip(".").upper() or "—",
+                self._format_bytes(file_data.size),
+                str(path.parent),
+                self._format_date(file_data.modified),
+            )
+        elif mode == ScanMode.PHOTOS:
+            return (
+                path.name,
+                path.suffix.lstrip(".").upper() or "—",
+                self._format_bytes(file_data.size),
+                self._format_date(file_data.modified),
+                f"{int(file_data.similarity * 100)}%",
+                meta.get("resolution", "—"),
+            )
+        else:  # FILES (default)
+            return (
+                path.name,
+                path.suffix.lstrip(".").upper() or "—",
+                self._format_bytes(file_data.size),
+                self._format_date(file_data.modified),
+                f"{int(file_data.similarity * 100)}%",
+            )
 
     def _show_empty_state(self) -> None:
         """Show getting-started / empty state view."""
@@ -982,11 +1044,36 @@ class ResultsPanel(CTkFrame):
         self._on_file_double_clicked = callback
 
     def set_mode(self, mode: str) -> None:
-        """Set active scan mode and update columns."""
+        """Set active scan mode, update columns, and show mode-specific warnings."""
         from cerebro.v2.ui.mode_tabs import ScanMode
         if mode not in ScanMode.all_modes():
             return
+        self._current_mode = mode
         self._configure_columns_for_mode(mode)
+
+    def show_ffmpeg_warning(self, visible: bool) -> None:
+        """Show or hide the FFmpeg-missing warning banner."""
+        if not hasattr(self, "_ffmpeg_banner"):
+            import customtkinter as ctk
+            self._ffmpeg_banner = ctk.CTkLabel(
+                self,
+                text="⚠  FFmpeg not found — running in metadata-only mode (duration+size).\n"
+                     "Install FFmpeg for frame-accurate matching:  winget install ffmpeg",
+                font=ctk.CTkFont(size=12),
+                fg_color=("#FFF3CD", "#4A3800"),
+                text_color=("#856404", "#FFD966"),
+                corner_radius=6,
+                anchor="w",
+                justify="left",
+                padx=12,
+                pady=6,
+            )
+        if visible:
+            if not self._ffmpeg_banner.winfo_ismapped():
+                self._ffmpeg_banner.pack(fill="x", padx=8, pady=(4, 0), before=self._status_frame)
+        else:
+            if self._ffmpeg_banner.winfo_ismapped():
+                self._ffmpeg_banner.pack_forget()
 
     def on_request_add_folder(self, cb: Callable[[], None]) -> None:
         """Wire getting-started 'Add Folder' button to MainWindow."""

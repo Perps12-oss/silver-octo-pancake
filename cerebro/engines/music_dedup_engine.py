@@ -251,7 +251,8 @@ class MusicDedupEngine(BaseEngine):
                         metadata={"duration": t.get("duration", 0),
                                   "bitrate": t.get("bitrate", 0),
                                   "title": t.get("title", ""),
-                                  "artist": t.get("artist", "")},
+                                  "artist": t.get("artist", ""),
+                                  "album": t.get("album", "")},
                     ))
                 except OSError:
                     pass
