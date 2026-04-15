@@ -265,7 +265,7 @@ def compute_quick_hash_fast(path: Path, algorithm: str = "md5") -> Optional[str]
                 hasher.update(f.read(32 * 1024))
         
         return hasher.hexdigest()
-    except (OSError, ValueError, RuntimeError, AttributeError, TypeError, KeyError, ImportError):
+    except (sqlite3.Error, OSError, ValueError, RuntimeError, AttributeError, TypeError, KeyError, ImportError):
         return None
 
 
@@ -380,7 +380,7 @@ def walk_directory_worker(args: Tuple) -> List[Tuple[Path, int, float]]:
                         continue
                     
                     results.append((file_path, size, stat.st_mtime))
-                except (OSError, ValueError, RuntimeError, AttributeError, TypeError, KeyError, ImportError):
+                except (sqlite3.Error, OSError, ValueError, RuntimeError, AttributeError, TypeError, KeyError, ImportError):
                     continue
         
     except (OSError, ValueError, RuntimeError, AttributeError, TypeError, KeyError, ImportError):

@@ -61,6 +61,9 @@ class HashCache:
     def __init__(self, db_path: Path):
         self.db_path = Path(db_path)
         self._local = threading.local()
+        self._write_lock = threading.Lock()
+        self._conn_lock = threading.Lock()
+        self._connections: set[sqlite3.Connection] = set()
         self._open = False
 
     # ------------------------------------------------------------------
@@ -74,6 +77,7 @@ class HashCache:
     def close(self) -> None:
         self._open = False
         self.close_connection()
+        self.close_all_connections()
 
     def get_connection(self) -> sqlite3.Connection:
         """Return the SQLite connection for the current thread; create if needed."""
@@ -81,13 +85,16 @@ class HashCache:
             raise RuntimeError("HashCache is not open()")
         conn = getattr(self._local, "conn", None)
         if conn is None:
-            conn = sqlite3.connect(str(self.db_path), timeout=10.0)
+            conn = sqlite3.connect(str(self.db_path), timeout=10.0, check_same_thread=False)
             conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute("PRAGMA synchronous=NORMAL;")
             conn.execute("PRAGMA temp_store=MEMORY;")
             conn.execute("PRAGMA cache_size=-20000;")
+            conn.execute("PRAGMA busy_timeout=5000;")
             self._init_schema(conn)
             self._local.conn = conn
+            with self._conn_lock:
+                self._connections.add(conn)
         return conn
 
     def close_connection(self) -> None:
@@ -102,7 +109,24 @@ class HashCache:
                 conn.close()
             except (OSError, ValueError, RuntimeError, AttributeError, TypeError, KeyError, ImportError):
                 pass
+            with self._conn_lock:
+                self._connections.discard(conn)
             self._local.conn = None
+
+    def close_all_connections(self) -> None:
+        """Close every tracked SQLite connection across all threads."""
+        with self._conn_lock:
+            conns = list(self._connections)
+            self._connections.clear()
+        for conn in conns:
+            try:
+                conn.commit()
+            except (sqlite3.Error, OSError, ValueError, RuntimeError, AttributeError, TypeError, KeyError, ImportError):
+                pass
+            try:
+                conn.close()
+            except (sqlite3.Error, OSError, ValueError, RuntimeError, AttributeError, TypeError, KeyError, ImportError):
+                pass
 
     def _init_schema(self, conn: sqlite3.Connection) -> None:
         conn.execute(
@@ -243,48 +267,56 @@ class HashCache:
         full_hash: Optional[str] = None,
         full_algo: Optional[str] = None,
     ) -> None:
-        conn = self._require_conn()
-        now = time.time()
-        # Bounded transaction: single upsert per call (thread-local conn, no cross-thread lock)
-        cur = conn.execute(
-            "SELECT quick_hash, quick_algo, quick_bytes, full_hash, full_algo FROM file_hashes WHERE path=?",
-            (str(path),),
-        )
-        existing = cur.fetchone()
-        if existing:
-            ex_qh, ex_qa, ex_qb, ex_fh, ex_fa = existing
-        else:
-            ex_qh = ex_qa = ex_fh = ex_fa = None
-            ex_qb = None
+        for attempt in range(5):
+            try:
+                with self._write_lock:
+                    conn = self._require_conn()
+                    now = time.time()
+                    cur = conn.execute(
+                        "SELECT quick_hash, quick_algo, quick_bytes, full_hash, full_algo FROM file_hashes WHERE path=?",
+                        (str(path),),
+                    )
+                    existing = cur.fetchone()
+                    if existing:
+                        ex_qh, ex_qa, ex_qb, ex_fh, ex_fa = existing
+                    else:
+                        ex_qh = ex_qa = ex_fh = ex_fa = None
+                        ex_qb = None
 
-        qh = quick_hash if quick_hash is not None else ex_qh
-        qa = quick_algo if quick_algo is not None else ex_qa
-        qb = int(quick_bytes) if quick_bytes is not None else (int(ex_qb) if ex_qb is not None else 0)
-        fh = full_hash if full_hash is not None else ex_fh
-        fa = full_algo if full_algo is not None else ex_fa
+                    qh = quick_hash if quick_hash is not None else ex_qh
+                    qa = quick_algo if quick_algo is not None else ex_qa
+                    qb = int(quick_bytes) if quick_bytes is not None else (int(ex_qb) if ex_qb is not None else 0)
+                    fh = full_hash if full_hash is not None else ex_fh
+                    fa = full_algo if full_algo is not None else ex_fa
 
-        conn.execute(
-            """
-            INSERT INTO file_hashes
-              (path, size, mtime_ns, dev, inode,
-               quick_hash, quick_algo, quick_bytes,
-               full_hash, full_algo, updated_ts)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(path) DO UPDATE SET
-              size=excluded.size,
-              mtime_ns=excluded.mtime_ns,
-              dev=excluded.dev,
-              inode=excluded.inode,
-              quick_hash=excluded.quick_hash,
-              quick_algo=excluded.quick_algo,
-              quick_bytes=excluded.quick_bytes,
-              full_hash=excluded.full_hash,
-              full_algo=excluded.full_algo,
-              updated_ts=excluded.updated_ts
-            """,
-            (str(path), sig.size, sig.mtime_ns, sig.dev, sig.inode, qh, qa, qb, fh, fa, now),
-        )
-        conn.commit()
+                    conn.execute(
+                        """
+                        INSERT INTO file_hashes
+                          (path, size, mtime_ns, dev, inode,
+                           quick_hash, quick_algo, quick_bytes,
+                           full_hash, full_algo, updated_ts)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(path) DO UPDATE SET
+                          size=excluded.size,
+                          mtime_ns=excluded.mtime_ns,
+                          dev=excluded.dev,
+                          inode=excluded.inode,
+                          quick_hash=excluded.quick_hash,
+                          quick_algo=excluded.quick_algo,
+                          quick_bytes=excluded.quick_bytes,
+                          full_hash=excluded.full_hash,
+                          full_algo=excluded.full_algo,
+                          updated_ts=excluded.updated_ts
+                        """,
+                        (str(path), sig.size, sig.mtime_ns, sig.dev, sig.inode, qh, qa, qb, fh, fa, now),
+                    )
+                    conn.commit()
+                return
+            except sqlite3.OperationalError as exc:
+                if "locked" in str(exc).lower() and attempt < 4:
+                    time.sleep(0.05 * (attempt + 1))
+                    continue
+                raise
 
     def get_stats(self) -> dict:
         """Return cache statistics (total_entries, cache_size_mb, hit_rate). Requires open()."""

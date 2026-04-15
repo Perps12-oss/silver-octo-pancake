@@ -16,6 +16,7 @@ Limitations (v1):
 from __future__ import annotations
 
 import logging
+import sqlite3
 import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -143,7 +144,7 @@ class TurboFileEngine(BaseEngine):
         try:
             self._state = ScanState.SCANNING
             self._do_scan()
-        except (OSError, ValueError, RuntimeError, AttributeError, TypeError, KeyError, ImportError) as exc:
+        except (sqlite3.Error, OSError, ValueError, RuntimeError, AttributeError, TypeError, KeyError, ImportError) as exc:
             logger.exception("Turbo scan failed: %s", exc)
             self._state = ScanState.ERROR
             self._progress = ScanProgress(state=ScanState.ERROR)

@@ -84,6 +84,10 @@ class ScanController:
         self._history = history
 
     def start_search(self) -> None:
+        if self._window._scanning or self._window._orchestrator.is_scanning():
+            logger.info("Ignoring duplicate start request while scan is active")
+            return
+
         folders = self._window._folder_panel.get_scan_folders()
         if not folders:
             self._window.show_info("No Folders", "Please add at least one folder to scan.")
