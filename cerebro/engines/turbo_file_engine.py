@@ -55,34 +55,34 @@ class TurboFileEngine(BaseEngine):
     def get_mode_options(self) -> List[EngineOption]:
         return [
             EngineOption(
-                key="hash_algorithm",
-                label="Hash Algorithm",
-                option_type="choice",
+                name="hash_algorithm",
+                display_name="Hash Algorithm",
+                type="choice",
                 default="sha256",
                 choices=["sha256", "xxhash", "blake3", "md5"],
             ),
             EngineOption(
-                key="min_size_bytes",
-                label="Minimum File Size (bytes)",
-                option_type="int",
+                name="min_size_bytes",
+                display_name="Minimum File Size (bytes)",
+                type="int",
                 default=0,
             ),
             EngineOption(
-                key="max_size_bytes",
-                label="Maximum File Size (bytes)",
-                option_type="int",
+                name="max_size_bytes",
+                display_name="Maximum File Size (bytes)",
+                type="int",
                 default=0,
             ),
             EngineOption(
-                key="include_hidden",
-                label="Include Hidden Files",
-                option_type="bool",
+                name="include_hidden",
+                display_name="Include Hidden Files",
+                type="bool",
                 default=False,
             ),
             EngineOption(
-                key="follow_symlinks",
-                label="Follow Symlinks",
-                option_type="bool",
+                name="follow_symlinks",
+                display_name="Follow Symlinks",
+                type="bool",
                 default=False,
             ),
         ]
@@ -90,11 +90,12 @@ class TurboFileEngine(BaseEngine):
     # -- lifecycle -------------------------------------------------------------
 
     def __init__(self) -> None:
+        super().__init__()
         self._folders: List[Path] = []
         self._protected: List[Path] = []
         self._options: Dict[str, Any] = {}
         self._results: List[DuplicateGroup] = []
-        self._progress: ScanProgress = ScanProgress()
+        self._progress: ScanProgress = ScanProgress(state=ScanState.IDLE)
         self._cancel_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._callback: Optional[Callable[[ScanProgress], None]] = None
@@ -113,6 +114,7 @@ class TurboFileEngine(BaseEngine):
         self._callback = progress_callback
         self._cancel_event.clear()
         self._results = []
+        self._state = ScanState.SCANNING
         self._progress = ScanProgress(state=ScanState.SCANNING)
         self._thread = threading.Thread(
             target=self._run_scan, daemon=True, name="turbo-scan"
@@ -127,6 +129,7 @@ class TurboFileEngine(BaseEngine):
 
     def cancel(self) -> None:
         self._cancel_event.set()
+        self._state = ScanState.CANCELLED
 
     def get_results(self) -> List[DuplicateGroup]:
         return self._results
@@ -138,9 +141,11 @@ class TurboFileEngine(BaseEngine):
 
     def _run_scan(self) -> None:
         try:
+            self._state = ScanState.SCANNING
             self._do_scan()
         except Exception as exc:
             logger.exception("Turbo scan failed: %s", exc)
+            self._state = ScanState.ERROR
             self._progress = ScanProgress(state=ScanState.ERROR)
             self._emit_progress()
 
@@ -165,12 +170,10 @@ class TurboFileEngine(BaseEngine):
             min_size=int(opts.get("min_size_bytes") or opts.get("min_size") or 0),
             max_size=int(opts.get("max_size_bytes") or opts.get("max_size") or 0),
             skip_hidden=not bool(opts.get("include_hidden", False)),
-            follow_symlinks=bool(opts.get("follow_symlinks", False)),
             use_multiprocessing=False,  # safer on Windows; still threaded
             use_quick_hash=True,
             use_full_hash=True,
             hash_algorithm=hash_algo,
-            max_group_size=10000,  # 0 in default means "no groups pass" — set high
             progress_callback=self._on_turbo_progress,
         )
 
@@ -182,6 +185,7 @@ class TurboFileEngine(BaseEngine):
         ]
 
         if not roots:
+            self._state = ScanState.COMPLETED
             self._progress = ScanProgress(state=ScanState.COMPLETED)
             self._emit_progress()
             return
@@ -191,12 +195,14 @@ class TurboFileEngine(BaseEngine):
         # Drain the generator ( TurboScanner.scan yields nothing but is a gen )
         for _ in scanner.scan(roots):
             if self._cancel_event.is_set():
+                self._state = ScanState.CANCELLED
                 self._progress = ScanProgress(state=ScanState.CANCELLED)
                 self._emit_progress()
                 return
 
         # Convert scanner.last_groups → DuplicateGroup list
         self._results = self._convert_groups(scanner.last_groups)
+        self._state = ScanState.COMPLETED
         self._progress = ScanProgress(
             state=ScanState.COMPLETED,
             files_scanned=self._progress.files_scanned,
@@ -214,6 +220,7 @@ class TurboFileEngine(BaseEngine):
             return
 
         state = _STAGE_MAP.get(stage, ScanState.SCANNING)
+        self._state = state
         scanned = processed if stage == "discovering" else self._progress.files_scanned
 
         self._progress = ScanProgress(
