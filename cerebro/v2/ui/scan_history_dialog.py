@@ -1,21 +1,11 @@
-"""
-Scan History Dialog
-
-Shows a list of past scan sessions (stored in ~/.cerebro/scan_history.json).
-Each entry records: timestamp, mode, folders scanned, groups found,
-files found, reclaimable bytes, duration.
-
-MainWindow appends an entry after every completed scan via
-ScanHistoryDialog.record_scan().
-"""
+"""Scan history dialog backed by sqlite (with legacy JSON migration)."""
 
 from __future__ import annotations
 
-import json
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import tkinter as tk
 from tkinter import ttk
@@ -37,10 +27,10 @@ except ImportError:
 from cerebro.v2.core.design_tokens import Spacing, Typography, Dimensions
 from cerebro.v2.core.theme_bridge_v2 import theme_color, subscribe_to_theme
 from cerebro.v2.ui.feedback import confirm_yes_no
+from cerebro.v2.core.scan_history_db import get_scan_history_db
 
 
-_HISTORY_FILE = Path.home() / ".cerebro" / "scan_history.json"
-_MAX_ENTRIES  = 100  # keep last N scans
+_LEGACY_HISTORY_FILE = Path.home() / ".cerebro" / "scan_history.json"
 
 
 # ---------------------------------------------------------------------------
@@ -48,20 +38,38 @@ _MAX_ENTRIES  = 100  # keep last N scans
 # ---------------------------------------------------------------------------
 
 def _load_history() -> List[Dict[str, Any]]:
-    try:
-        if _HISTORY_FILE.exists():
-            return json.loads(_HISTORY_FILE.read_text())
-    except Exception:
-        pass
-    return []
+    db = get_scan_history_db()
+    rows = db.get_recent(limit=500)
+    return [
+        {
+            "timestamp": r.timestamp,
+            "mode": r.mode,
+            "folders": r.folders,
+            "groups_found": r.groups_found,
+            "files_found": r.files_found,
+            "bytes_reclaimable": r.bytes_reclaimable,
+            "duration_seconds": r.duration_seconds,
+        }
+        for r in rows
+    ]
 
 
 def _save_history(entries: List[Dict[str, Any]]) -> None:
-    try:
-        _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _HISTORY_FILE.write_text(json.dumps(entries[-_MAX_ENTRIES:], indent=2))
-    except Exception:
-        pass
+    db = get_scan_history_db()
+    db.clear()
+    for row in entries:
+        try:
+            db.record_scan(
+                mode=str(row.get("mode", "files")),
+                folders=[str(x) for x in row.get("folders", [])],
+                groups_found=int(row.get("groups_found", 0)),
+                files_found=int(row.get("files_found", 0)),
+                bytes_reclaimable=int(row.get("bytes_reclaimable", 0)),
+                duration_seconds=float(row.get("duration_seconds", 0.0)),
+                timestamp=float(row.get("timestamp", time.time())),
+            )
+        except Exception:
+            continue
 
 
 def record_scan(
@@ -76,17 +84,14 @@ def record_scan(
     Append a completed scan record to the history file.
     Call this from MainWindow after every successful scan.
     """
-    entries = _load_history()
-    entries.append({
-        "timestamp":         time.time(),
-        "mode":              mode,
-        "folders":           folders,
-        "groups_found":      groups_found,
-        "files_found":       files_found,
-        "bytes_reclaimable": bytes_reclaimable,
-        "duration_seconds":  duration_seconds,
-    })
-    _save_history(entries)
+    get_scan_history_db().record_scan(
+        mode=mode,
+        folders=folders,
+        groups_found=groups_found,
+        files_found=files_found,
+        bytes_reclaimable=bytes_reclaimable,
+        duration_seconds=duration_seconds,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +113,7 @@ class ScanHistoryDialog:
 
     def __init__(self, parent: tk.Misc) -> None:
         self._parent = parent
+        self._migrate_legacy_history_if_present()
         self._win = CTkToplevel(parent)
         self._win.title("Scan History")
         self._win.geometry("780x480")
@@ -210,6 +216,13 @@ class ScanHistoryDialog:
     def _apply_theme(self) -> None:
         try:
             self._win.configure(fg_color=theme_color("base.background"))
+        except Exception:
+            pass
+
+    def _migrate_legacy_history_if_present(self) -> None:
+        try:
+            if _LEGACY_HISTORY_FILE.exists():
+                get_scan_history_db().import_legacy_json(_LEGACY_HISTORY_FILE)
         except Exception:
             pass
 

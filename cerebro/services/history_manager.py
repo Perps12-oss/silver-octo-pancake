@@ -1,14 +1,11 @@
 # cerebro/services/history_manager.py
-"""
-Minimal stub so audit_page (and other callers) can import get_history_manager
-without crashing. Full implementation deferred; returns None until wired.
-"""
+"""Compatibility facade for v2 deletion history manager."""
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from cerebro.v2.core.deletion_history_db import get_default_history_manager
 
 
-def get_history_manager() -> Optional[Any]:
-    """Stub: no-op history manager for compatibility. Returns None until implemented."""
-    return None
+def get_history_manager():
+    """Return the v2 sqlite deletion history manager."""
+    return get_default_history_manager()

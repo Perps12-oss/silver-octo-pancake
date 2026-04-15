@@ -38,6 +38,13 @@ from cerebro.v2.core.design_tokens import (
     Spacing, Typography, Dimensions
 )
 from cerebro.v2.core.theme_bridge_v2 import theme_color, subscribe_to_theme
+from cerebro.v2.ui.feedback import FeedbackPanel
+
+
+def get_settings_path() -> Path:
+    path = Path.home() / ".cerebro" / "settings.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 class Settings:
@@ -47,6 +54,7 @@ class Settings:
         self.general = {
             "default_mode": "files",
             "confirm_before_delete": True,
+            "auto_collapse": True,
             "remember_folders": True,
             "last_folders": [],
             "last_protected": [],
@@ -143,8 +151,20 @@ class Settings:
 
     def save(self, path: Path) -> None:
         """Save settings to file."""
+        path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, 'w') as f:
             json.dump(self.to_dict(), f, indent=2)
+
+    def auto_mark_selection_rule(self) -> str:
+        mapping = {
+            "keep_largest": "select_except_largest",
+            "keep_smallest": "select_except_smallest",
+            "keep_newest": "select_except_newest",
+            "keep_oldest": "select_except_oldest",
+            "keep_first": "select_except_first",
+            "keep_highest_resolution": "select_except_highest_resolution",
+        }
+        return mapping.get(self.deletion.get("auto_mark_rule", "keep_largest"), "select_except_largest")
 
     @classmethod
     def load(cls, path: Path) -> "Settings":
@@ -187,6 +207,7 @@ class SettingsDialog(CTkToplevel):
 
         # Callbacks
         self._on_save: Optional[Callable[[Settings], None]] = None
+        self._controls: Dict[str, Any] = {}
 
         # Build UI
         self._setup_window()
@@ -284,13 +305,15 @@ class SettingsDialog(CTkToplevel):
         mode_menu = CTkOptionMenu(
             tab,
             values=["Files", "Photos", "Videos", "Music", "Empty Folders", "Large Files"],
-            default_value="Files",
             font=Typography.FONT_SM,
             fg_color=theme_color("base.foreground"),
             button_color=theme_color("base.backgroundElevated"),
             dropdown_fg_color=theme_color("base.foreground")
         )
+        current_mode = str(self._settings.general.get("default_mode", "files")).replace("_", " ").title()
+        mode_menu.set(current_mode)
         mode_menu.pack(fill="x", padx=Spacing.SM, pady=(Spacing.XS, Spacing.MD))
+        self._controls["general.default_mode"] = mode_menu
 
         # Confirm before delete
         confirm_frame = CTkFrame(tab)
@@ -306,6 +329,7 @@ class SettingsDialog(CTkToplevel):
         confirm_check.pack(side="left", padx=Spacing.SM)
         if self._settings.general.get("confirm_before_delete", True):
             confirm_check.select()
+        self._controls["general.confirm_before_delete"] = confirm_check
 
         # Remember folders
         remember_check = CTkCheckBox(
@@ -318,6 +342,19 @@ class SettingsDialog(CTkToplevel):
         remember_check.pack(side="left", padx=Spacing.LG)
         if self._settings.general.get("remember_folders", True):
             remember_check.select()
+        self._controls["general.remember_folders"] = remember_check
+
+        collapse_check = CTkCheckBox(
+            tab,
+            text="Auto-collapse folder panel while scanning",
+            font=Typography.FONT_SM,
+            onvalue=True,
+            offvalue=False
+        )
+        collapse_check.pack(fill="x", padx=Spacing.SM, pady=(0, Spacing.SM))
+        if self._settings.general.get("auto_collapse", True):
+            collapse_check.select()
+        self._controls["general.auto_collapse"] = collapse_check
 
     def _build_appearance_tab(self) -> None:
         """Build Appearance settings tab."""
@@ -390,6 +427,7 @@ class SettingsDialog(CTkToplevel):
         )
         font_size_slider.set(self._settings.appearance.get("font_size", 13))
         font_size_slider.pack(fill="x", padx=Spacing.SM, pady=(Spacing.XS, Spacing.MD))
+        self._controls["appearance.font_size"] = font_size_slider
 
     # ------------------------------------------------------------------
     # Theme helpers
@@ -456,6 +494,7 @@ class SettingsDialog(CTkToplevel):
         )
         threads_slider.set(self._settings.performance.get("max_threads", 0))
         threads_slider.pack(fill="x", padx=Spacing.SM, pady=(Spacing.XS, Spacing.MD))
+        self._controls["performance.max_threads"] = threads_slider
 
         # Hash cache enabled
         cache_frame = CTkFrame(tab)
@@ -471,6 +510,7 @@ class SettingsDialog(CTkToplevel):
         cache_check.pack(side="left", padx=Spacing.SM)
         if self._settings.performance.get("hash_cache_enabled", True):
             cache_check.select()
+        self._controls["performance.hash_cache_enabled"] = cache_check
 
         # Cache size
         size_label = CTkLabel(
@@ -481,12 +521,24 @@ class SettingsDialog(CTkToplevel):
         )
         size_label.pack(side="left", padx=Spacing.LG)
 
-        CTkLabel(
+        self._cache_size_label = CTkLabel(
             cache_frame,
             text=str(self._settings.performance.get("hash_cache_max_mb", 500)),
             font=Typography.FONT_SM,
             text_color=theme_color("base.foregroundSecondary")
-        ).pack(side="left", padx=Spacing.XS)
+        )
+        self._cache_size_label.pack(side="left", padx=Spacing.XS)
+        cache_slider = CTkSlider(
+            tab,
+            from_=50,
+            to=5000,
+            number_of_steps=99,
+            font=Typography.FONT_SM
+        )
+        cache_slider.set(self._settings.performance.get("hash_cache_max_mb", 500))
+        cache_slider.pack(fill="x", padx=Spacing.SM, pady=(Spacing.XS, Spacing.MD))
+        cache_slider.configure(command=lambda v: self._cache_size_label.configure(text=str(int(v))))
+        self._controls["performance.hash_cache_max_mb"] = cache_slider
 
     def _build_deletion_tab(self) -> None:
         """Build Deletion settings tab."""
@@ -504,13 +556,14 @@ class SettingsDialog(CTkToplevel):
         method_menu = CTkOptionMenu(
             tab,
             values=["Recycle Bin", "Delete Permanently", "Move to Folder"],
-            default_value="Recycle Bin",
             font=Typography.FONT_SM,
             fg_color=theme_color("base.foreground"),
             button_color=theme_color("base.backgroundElevated"),
             dropdown_fg_color=theme_color("base.foreground")
         )
+        method_menu.set("Recycle Bin")
         method_menu.pack(fill="x", padx=Spacing.SM, pady=(Spacing.XS, Spacing.MD))
+        self._controls["deletion.method"] = method_menu
 
         # Auto-mark rule
         CTkLabel(
@@ -524,13 +577,47 @@ class SettingsDialog(CTkToplevel):
         rule_menu = CTkOptionMenu(
             tab,
             values=["Keep Largest", "Keep Smallest", "Keep Newest", "Keep Oldest", "Keep First"],
-            default_value="Keep Largest",
             font=Typography.FONT_SM,
             fg_color=theme_color("base.foreground"),
             button_color=theme_color("base.backgroundElevated"),
             dropdown_fg_color=theme_color("base.foreground")
         )
+        rule_map = {
+            "keep_largest": "Keep Largest",
+            "keep_smallest": "Keep Smallest",
+            "keep_newest": "Keep Newest",
+            "keep_oldest": "Keep Oldest",
+            "keep_first": "Keep First",
+        }
+        rule_menu.set(rule_map.get(self._settings.deletion.get("auto_mark_rule", "keep_largest"), "Keep Largest"))
         rule_menu.pack(fill="x", padx=Spacing.SM, pady=(Spacing.XS, Spacing.MD))
+        self._controls["deletion.auto_mark_rule"] = rule_menu
+
+        # Photo threshold controls (requested in handoff)
+        CTkLabel(
+            tab,
+            text="Photo Thresholds (bits)",
+            font=Typography.FONT_SM,
+            text_color=theme_color("base.foreground"),
+            anchor="w"
+        ).pack(fill="x", padx=Spacing.SM, pady=(Spacing.SM, 0))
+        self._phash_label = CTkLabel(tab, text="", font=Typography.FONT_XS)
+        self._phash_label.pack(fill="x", padx=Spacing.SM, pady=(Spacing.XS, 0))
+        phash_slider = CTkSlider(tab, from_=0, to=64, number_of_steps=64)
+        phash_slider.set(self._settings.photo_mode.get("phash_threshold", 8))
+        phash_slider.pack(fill="x", padx=Spacing.SM)
+        self._phash_label.configure(text=f"pHash: {int(phash_slider.get())}")
+        phash_slider.configure(command=lambda v: self._phash_label.configure(text=f"pHash: {int(v)}"))
+        self._controls["photo_mode.phash_threshold"] = phash_slider
+
+        self._dhash_label = CTkLabel(tab, text="", font=Typography.FONT_XS)
+        self._dhash_label.pack(fill="x", padx=Spacing.SM, pady=(Spacing.XS, 0))
+        dhash_slider = CTkSlider(tab, from_=0, to=64, number_of_steps=64)
+        dhash_slider.set(self._settings.photo_mode.get("dhash_threshold", 10))
+        dhash_slider.pack(fill="x", padx=Spacing.SM)
+        self._dhash_label.configure(text=f"dHash: {int(dhash_slider.get())}")
+        dhash_slider.configure(command=lambda v: self._dhash_label.configure(text=f"dHash: {int(v)}"))
+        self._controls["photo_mode.dhash_threshold"] = dhash_slider
 
         # Warning notice
         CTkLabel(
@@ -583,7 +670,7 @@ class SettingsDialog(CTkToplevel):
         # Repository link
         CTkLabel(
             tab,
-            text="Repository: github.com/Perps12-oss/dedup",
+            text="Repository: github.com/Perps12-oss/silver-octo-pancake",
             font=Typography.FONT_SM,
             text_color=theme_color("base.accent")
         ).pack(pady=Spacing.MD)
@@ -619,8 +706,32 @@ class SettingsDialog(CTkToplevel):
 
     def _on_save_clicked(self) -> None:
         """Handle Save button click."""
-        # TODO: Collect values from all widgets and update settings
-        print("Settings saved")
+        # Collect tracked control values
+        mode_val = str(self._controls["general.default_mode"].get()).lower().replace(" ", "_")
+        self._settings.general["default_mode"] = mode_val
+        self._settings.general["confirm_before_delete"] = bool(self._controls["general.confirm_before_delete"].get())
+        self._settings.general["remember_folders"] = bool(self._controls["general.remember_folders"].get())
+        self._settings.general["auto_collapse"] = bool(self._controls["general.auto_collapse"].get())
+        self._settings.appearance["font_size"] = int(float(self._controls["appearance.font_size"].get()))
+        self._settings.performance["max_threads"] = int(float(self._controls["performance.max_threads"].get()))
+        self._settings.performance["hash_cache_enabled"] = bool(self._controls["performance.hash_cache_enabled"].get())
+        self._settings.performance["hash_cache_max_mb"] = int(float(self._controls["performance.hash_cache_max_mb"].get()))
+        self._settings.photo_mode["phash_threshold"] = int(float(self._controls["photo_mode.phash_threshold"].get()))
+        self._settings.photo_mode["dhash_threshold"] = int(float(self._controls["photo_mode.dhash_threshold"].get()))
+
+        method_value = str(self._controls["deletion.method"].get()).lower().replace(" ", "_")
+        self._settings.deletion["method"] = "recycle_bin" if method_value.startswith("recycle") else method_value
+        rule_value = str(self._controls["deletion.auto_mark_rule"].get()).lower().replace(" ", "_")
+        self._settings.deletion["auto_mark_rule"] = rule_value
+
+        if hasattr(self, "_theme_menu"):
+            self._settings.appearance["theme"] = str(self._theme_menu.get())
+
+        try:
+            self._settings.save(get_settings_path())
+        except OSError as exc:
+            FeedbackPanel(self, "Save Error", f"Could not write settings:\n{exc}", type="error")
+            return
 
         # Notify callback
         if self._on_save:

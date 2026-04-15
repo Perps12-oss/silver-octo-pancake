@@ -321,6 +321,11 @@ class ScanOptionsPanel(CTkScrollableFrame):
     def set_mode(self, mode: str) -> None:
         self._set_mode_options(mode)
 
+    def set_slider_value(self, key: str, value: int) -> None:
+        widget = self._option_widgets.get(key)
+        if isinstance(widget, CTkSlider):
+            widget.set(float(value))
+
     def get_options(self) -> Dict:
         options: Dict[str, object] = {"mode": self._current_mode}
         for key, widget in self._option_widgets.items():
@@ -569,6 +574,12 @@ class FolderPanel(CTkFrame):
                 text=mode_labels.get(mode, "Scan Options"))
         except Exception:
             pass
+
+    def set_photo_phash_dhash_defaults(self, phash_threshold: int, dhash_threshold: int) -> None:
+        """Apply persisted image threshold defaults to the photos options panel."""
+        self.set_scan_mode("photos")
+        self._options_panel.set_slider_value("phash_threshold", phash_threshold)
+        self._options_panel.set_slider_value("dhash_threshold", dhash_threshold)
 
     def get_scan_folders(self) -> List[Path]:
         return self._scan_list.get_folders()

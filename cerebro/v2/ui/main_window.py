@@ -33,11 +33,12 @@ from cerebro.v2.core.theme_bridge_v2 import theme_color, subscribe_to_theme, set
 from cerebro.v2.ui.toolbar import Toolbar, TopActionToolbar
 from cerebro.v2.ui.mode_tabs import ModeTabs, ModeNavPanel
 from cerebro.v2.ui.status_bar import StatusBar, StatusBarMetrics
-from cerebro.v2.ui.settings_dialog import SettingsDialog, Settings
+from cerebro.v2.ui.settings_dialog import SettingsDialog, Settings, get_settings_path
 from cerebro.v2.ui.folder_panel import FolderPanel
 from cerebro.v2.ui.results_panel import ResultsPanel
 from cerebro.v2.ui.preview_panel import PreviewPanel
 from cerebro.v2.ui.feedback import CTkMessageInterface, FeedbackPanel, confirm_yes_no, show_text_panel
+from cerebro.v2.core.deletion_history_db import log_deletion_event
 from cerebro.engines.orchestrator import ScanOrchestrator
 from cerebro.engines.base_engine import (
     ScanProgress, ScanState, DuplicateGroup, DuplicateFile
@@ -77,6 +78,7 @@ class MainWindow(CTk, CTkMessageInterface):
         self._current_scan_mode: str = "files"
         self._scanning: bool = False
         self._preview_collapsed: bool = False
+        self._app_settings: Settings = Settings.load(get_settings_path())
 
         # Scan state
         self._scan_start_time: float = 0.0
@@ -97,6 +99,7 @@ class MainWindow(CTk, CTkMessageInterface):
         self._bind_shortcuts()
         self._bind_window_events()
         subscribe_to_theme(self, self._apply_theme)
+        self._apply_loaded_settings()
 
     def _setup_window(self) -> None:
         """Configure window properties."""
@@ -314,9 +317,11 @@ class MainWindow(CTk, CTkMessageInterface):
         from tkinter import filedialog
         path = filedialog.askdirectory(title="Select folder to scan")
         if path:
-            self._folder_panel.get_scan_folders().append(Path(path))
-            self._toolbar.add_folder(Path(path))
-            print(f"Added folder: {path}")
+            candidate = Path(path)
+            folders = self._folder_panel.get_scan_folders()
+            if candidate not in folders:
+                self._folder_panel.set_scan_folders(folders + [candidate])
+                self._toolbar.add_folder(candidate)
 
     def _on_remove_path(self) -> None:
         """Handle remove path button."""
@@ -362,8 +367,9 @@ class MainWindow(CTk, CTkMessageInterface):
         print(f"Protected: {[str(f) for f in protected_folders]}")
         print(f"Options: {scan_options}")
 
-        # Collapse left panel so results get full width
-        self._folder_panel.set_collapsed(True)
+        # Collapse left panel so results get full width (user-toggleable in settings)
+        if self._app_settings.general.get("auto_collapse", True):
+            self._folder_panel.set_collapsed(True)
 
         # Set mode and start scan
         self._orchestrator.set_mode(scan_mode)
@@ -390,14 +396,18 @@ class MainWindow(CTk, CTkMessageInterface):
 
     def _on_settings(self) -> None:
         """Handle settings button."""
-        # Create and show settings dialog as a modal
-        SettingsDialog.show_dialog(parent=self, settings=None)
+        updated = SettingsDialog.show_dialog(parent=self, settings=self._app_settings)
+        if updated:
+            self._app_settings = updated
+            self._apply_loaded_settings()
+            self._status_bar.flash_message("Settings saved.")
 
     def _on_help(self) -> None:
         """Handle help button — show a small popup menu."""
         menu = tk.Menu(self, tearoff=0)
         menu.add_command(label="Keyboard Shortcuts…", command=self._show_keyboard_help)
         menu.add_command(label="Scan History…",        command=self._show_scan_history)
+        menu.add_command(label="Deletion History…",    command=self._show_deletion_history)
         try:
             btn = self._toolbar._help_btn
             x = btn.winfo_rootx()
@@ -424,6 +434,10 @@ class MainWindow(CTk, CTkMessageInterface):
     def _show_scan_history(self) -> None:
         from cerebro.v2.ui.scan_history_dialog import ScanHistoryDialog
         ScanHistoryDialog.show(parent=self)
+
+    def _show_deletion_history(self) -> None:
+        from cerebro.v2.ui.deletion_history_dialog import DeletionHistoryDialog
+        DeletionHistoryDialog.show(parent=self)
 
     def _on_folder_panel_collapse(self, collapsed: bool) -> None:
         """Resize paned window sash when left panel collapses/expands."""
@@ -784,6 +798,16 @@ class MainWindow(CTk, CTkMessageInterface):
 
     def _on_delete_selected(self) -> None:
         """Handle delete selected action."""
+        def _fd_path(fd: Any) -> str:
+            if isinstance(fd, dict):
+                return str(fd.get("path", ""))
+            return str(getattr(fd, "path", ""))
+
+        def _fd_size(fd: Any) -> int:
+            if isinstance(fd, dict):
+                return int(fd.get("size", 0))
+            return int(getattr(fd, "size", 0))
+
         selected_files = self._results_panel.get_selected_files()
         if not selected_files:
             self.show_info(
@@ -795,12 +819,14 @@ class MainWindow(CTk, CTkMessageInterface):
         reclaimable_space = self._results_panel.get_reclaimable_space()
         reclaimable_str = self._format_bytes(reclaimable_space)
 
-        confirm = self.confirm_action(
-            "Send to Recycle Bin",
-            f"Send {len(selected_files)} files to the Recycle Bin?\n\n"
-            f"Space freed: {reclaimable_str}\n\n"
-            f"You can restore them from the Recycle Bin if needed."
-        )
+        confirm = True
+        if self._app_settings.general.get("confirm_before_delete", True):
+            confirm = self.confirm_action(
+                "Send to Recycle Bin",
+                f"Send {len(selected_files)} files to the Recycle Bin?\n\n"
+                f"Space freed: {reclaimable_str}\n\n"
+                f"You can restore them from the Recycle Bin if needed."
+            )
 
         if confirm:
             # Actually delete files using send2trash
@@ -820,11 +846,12 @@ class MainWindow(CTk, CTkMessageInterface):
             # Delete each selected file
             deleted_paths: List[str] = []
             for file_data in selected_files:
-                file_path = Path(file_data.get("path", ""))
+                file_path = Path(_fd_path(file_data))
                 try:
                     send2trash(str(file_path))
                     success_count += 1
                     deleted_paths.append(str(file_path))
+                    log_deletion_event(str(file_path), _fd_size(file_data), self.get_scan_mode())
                 except Exception as e:
                     failed_files.append((str(file_path), str(e)))
 
@@ -860,7 +887,17 @@ class MainWindow(CTk, CTkMessageInterface):
         Args:
             deleted_files: List of file data dictionaries for deleted files.
         """
-        deleted_paths = {f.get("path", "") for f in deleted_files}
+        def _fd_path(fd: Any) -> str:
+            if isinstance(fd, dict):
+                return str(fd.get("path", ""))
+            return str(getattr(fd, "path", ""))
+
+        def _fd_size(fd: Any) -> int:
+            if isinstance(fd, dict):
+                return int(fd.get("size", 0))
+            return int(getattr(fd, "size", 0))
+
+        deleted_paths = {_fd_path(f) for f in deleted_files}
 
         # Remove deleted files from filtered groups
         groups_to_update = []
@@ -868,13 +905,13 @@ class MainWindow(CTk, CTkMessageInterface):
             # Filter out deleted files
             remaining_files = [
                 f for f in group.files
-                if f.get("path", "") not in deleted_paths
+                if _fd_path(f) not in deleted_paths
             ]
 
             if remaining_files:
                 # Update group with remaining files
-                new_total_size = sum(f.get("size", 0) for f in remaining_files)
-                new_reclaimable = new_total_size - max(f.get("size", 0) for f in remaining_files) if remaining_files else 0
+                new_total_size = sum(_fd_size(f) for f in remaining_files)
+                new_reclaimable = new_total_size - max(_fd_size(f) for f in remaining_files) if remaining_files else 0
 
                 group.files = remaining_files
                 group.total_size = new_total_size
@@ -1253,6 +1290,30 @@ def _mw_confirm_action(self, title: str, message: str) -> bool:
 MainWindow.show_error = _mw_show_error
 MainWindow.show_info = _mw_show_info
 MainWindow.confirm_action = _mw_confirm_action
+
+
+def _apply_loaded_settings(self: MainWindow) -> None:
+    """Apply persisted settings to mode/options and startup UI state."""
+    try:
+        mode = str(self._app_settings.general.get("default_mode", "files"))
+        self._mode_tabs.set_mode(mode)
+        self._current_scan_mode = mode
+        self._folder_panel.set_scan_mode(mode)
+        self._results_panel.set_mode(mode)
+        self._orchestrator.set_mode(mode)
+    except Exception:
+        pass
+    try:
+        self._folder_panel.set_photo_phash_dhash_defaults(
+            int(self._app_settings.photo_mode.get("phash_threshold", 8)),
+            int(self._app_settings.photo_mode.get("dhash_threshold", 10)),
+        )
+        self._folder_panel.set_scan_mode(self._current_scan_mode)
+    except Exception:
+        pass
+
+
+MainWindow._apply_loaded_settings = _apply_loaded_settings
 
 
 # Simple logger fallback

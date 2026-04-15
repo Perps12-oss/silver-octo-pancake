@@ -179,6 +179,16 @@ class ResultsPanel(CTkFrame):
         self._on_request_add_folder: Optional[Callable[[], None]] = None
         self._on_request_start_search: Optional[Callable[[], None]] = None
 
+    def _fd_path(self, fd) -> str:
+        if isinstance(fd, dict):
+            return str(fd.get("path", ""))
+        return str(getattr(fd, "path", ""))
+
+    def _fd_size(self, fd) -> int:
+        if isinstance(fd, dict):
+            return int(fd.get("size", 0))
+        return int(getattr(fd, "size", 0))
+
     def _apply_theme(self) -> None:
         """Reconfigure all widget colors when theme changes."""
         self.configure(fg_color=theme_color("results.background"))
@@ -409,7 +419,7 @@ class ResultsPanel(CTkFrame):
         menu = tk.Menu(self, tearoff=0)
 
         if file_data:
-            path = file_data.get("path", "")
+            path = self._fd_path(file_data)
             menu.add_command(label="Open File",
                              command=lambda: self._open_file(path))
             menu.add_command(label="Open Containing Folder",
@@ -494,10 +504,10 @@ class ResultsPanel(CTkFrame):
 
     def _show_properties(self, file_data: Dict[str, Any]) -> None:
         from datetime import datetime
-        path = file_data.get("path", "—")
-        size = file_data.get("size", 0)
-        modified = file_data.get("modified", 0)
-        similarity = file_data.get("similarity", 1.0)
+        path = self._fd_path(file_data)
+        size = self._fd_size(file_data)
+        modified = getattr(file_data, "modified", file_data.get("modified", 0))
+        similarity = getattr(file_data, "similarity", file_data.get("similarity", 1.0))
         size_str = self._format_bytes(size)
         mod_str = datetime.fromtimestamp(modified).strftime("%Y-%m-%d %H:%M:%S") if modified else "—"
         sim_str = f"{int(similarity * 100)}%"
@@ -566,7 +576,7 @@ class ResultsPanel(CTkFrame):
         counts: Dict[str, int] = {ft: 0 for ft in FilterType.all_filters()}
         for group in groups:
             for file_data in group.files:
-                ext = Path(file_data.get("path", "")).suffix.lower()
+                ext = Path(self._fd_path(file_data)).suffix.lower()
                 matched = False
                 for ft in (FilterType.IMAGES, FilterType.VIDEOS,
                            FilterType.DOCUMENTS, FilterType.AUDIO):
@@ -787,6 +797,24 @@ class ResultsPanel(CTkFrame):
             self._filter_bar.pack_forget()
         self._show_empty_state()
         self._update_status()
+
+    # Compatibility helpers used by main window wiring.
+    def show_welcome_screen(self) -> None:
+        self.clear()
+
+    def show_scanning_progress(self, message: str = "Scanning...") -> None:
+        self._show_empty_state()
+        self._results_count_label.configure(text=message)
+
+    def set_live_scan_status(self, message: str) -> None:
+        self._results_count_label.configure(text=message)
+
+    def refresh_after_delete(self) -> None:
+        self._refresh_treeview()
+        self._update_status()
+
+    def get_selected_items(self) -> List:
+        return self.get_selected_files()
 
     def remove_paths(self, paths: List[str]) -> None:
         """
