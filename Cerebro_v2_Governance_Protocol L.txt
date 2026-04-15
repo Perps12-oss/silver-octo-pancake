@@ -1,188 +1,0 @@
-
-CEREBRO v2
-—
-Implementation Governance Protocol
-Preventing Drift. Enforcing Accountability. Shipping the Full Vision.
-Version 1.0  |  April 2025  |  Steve + AI Implementation Team
-
-1. Why This Document Exists	3
-1.1 What Went Wrong (The Autopsy)	3
-2. The Three Contracts	4
-2.1 Contract 1: The User Wants List Is Immutable	4
-2.2 Contract 2: The Sprint Plan Is the Execution Order	4
-2.3 Contract 3: Every Session Produces a Verifiable Deliverable	4
-3. The Session Protocol	5
-3.1 Phase 1: Context Loading (First 5 Minutes)	5
-3.2 Phase 2: Implementation	5
-3.3 Phase 3: Verification	5
-3.4 Phase 4: Session Close	6
-4. The Discovery Protocol	6
-4.1 The Decision Tree	6
-4.2 The 50% Rule	7
-5. Change Control	7
-5.1 What Requires Steve's Explicit Approval	7
-5.2 What the Agent Can Do Autonomously	7
-5.3 The Change Log	8
-6. Quality Gates	8
-6.1 Per-Task Quality Gate	8
-6.2 Per-Sprint Quality Gate	8
-6.3 Final Release Quality Gate	9
-7. The Accountability Loop	9
-7.1 Weekly Review (Every 7 Days)	9
-7.2 Sprint Boundary Review	9
-8. The Session Template	9
-9. The Worklog Format	10
-10. The Five Iron Rules	10
-
-Note: Right-click the TOC and select “Update Field” to ensure page numbers are accurate.
-
-
-1. Why This Document Exists
-Cerebro v2 has been through seven plan iterations (v1 through v3.2) across multiple Claude conversations. Each iteration was triggered by a legitimate user concern or discovery, but the cumulative effect was significant: effort was consumed by restructuring rather than building, features identified in the original research were silently dropped during plan revisions, and the implementation drifted from the user's explicit requirements without either party realising it.
-This governance protocol exists to ensure that from this point forward, every coding session produces forward progress toward the complete, validated feature set. It establishes three non-negotiable contracts between the user (Steve), the AI implementation agent, and the plan itself.
-1.1 What Went Wrong (The Autopsy)
-Before establishing rules, we must understand the specific failure patterns that caused drift. These are not abstract problems — they are concrete, repeatable anti-patterns that occurred multiple times during the v1–v3.2 evolution.
-Anti-PatternWhat HappenedThe CostReplan-on-ComplaintUser reported UI didn't match Ashisoft. Instead of fixing specific widgets, we created 5 new phases (A–E) and restructured the entire task list.3 sessions consumed by planning instead of coding. Left panel still cramped.Silent Feature DropOriginal Phase 5 included dry run mode, mmap, and background pre-scanning. When the plan was restructured from v1 to v2, these features were never carried forward.4 features identified in user's requirements simply vanished. No one noticed until the validator was built.Implementation Without VerificationImage engine was marked DONE but _run_scan was copy-pasted from the orchestrator and non-functional. Music engine had a false-positive bug.Features reported as complete were actually broken. Users would have encountered crashes on first real use.Scope Creep via QuestionsOriginal planning asked 10 questions, then 3 more batches. Each answer expanded scope. The full media suite was chosen without assessing effort vs the base app quality.61% of features partially done, 0% at production quality. Breadth won over depth.No Session ContinuityEach Claude session started without full context of what previous sessions had done. Work was repeated, contradictions were introduced.Wasted effort, inconsistent code patterns, bugs introduced by agents who didn't understand prior decisions.2. The Three Contracts
-Governance is built on three contracts. None of them can be broken without explicit user sign-off documented in the worklog.
-2.1 Contract 1: The User Wants List Is Immutable
-The 44 user wants tracked in the Ultimate Validator (W-01 through W-44) are the complete set of requirements. No new want can be added, and no existing want can be removed, without Steve explicitly saying so and the change being logged in the worklog. If a new idea comes up during implementation, it goes into a Deferred Ideas section — not into the active plan.
-Rule: If a feature is not on the User Wants List, it does not get implemented. If a feature IS on the list, it does not get silently dropped during any restructuring.
-2.2 Contract 2: The Sprint Plan Is the Execution Order
-The 6-sprint plan in the Phase Tracker (Sprint 1 through Sprint 6, R-01 through R-21) defines the exact build order. Tasks are executed in sprint order. Within a sprint, tasks are executed in their listed sequence (dependencies are pre-resolved). No task is skipped, and no task is executed out of order without explicit user approval.
-Rule: One sprint at a time. Complete every task in Sprint N before starting Sprint N+1. A sprint is complete when all its tasks pass their acceptance criteria AND the validator is updated.
-2.3 Contract 3: Every Session Produces a Verifiable Deliverable
-Every coding session must produce at least one concrete, testable result that moves a validator item from FAIL/WARN to PASS. Sessions that only produce planning, restructuring, or conversation without code changes are failures of this contract. The worklog entry for every session must include: what task was worked on, what was changed, what was tested, and what the validator status is after the session.
-Rule: No session ends without updating the worklog AND the validator. If a session discovers a bug, the bug is either fixed in the same session or logged as a BLOCKER in the worklog with a clear description of what's broken and what task it blocks.
-3. The Session Protocol
-Every implementation session — whether with Claude, another AI, or a human developer — follows the same four-phase protocol. This is not optional. This protocol is what prevents drift.
-3.1 Phase 1: Context Loading (First 5 Minutes)
-Before writing any code, the implementing agent MUST:
-1. Read /home/z/my-project/worklog.md to understand every previous session's work, decisions, and blockers.
-2. Read the latest validator status (the User Wants Validator sheet) to know what's PASS, WARN, and FAIL.
-3. Identify the current sprint and the next uncompleted task in that sprint.
-4. Confirm with Steve: 'I'm about to work on [Task ID]. Its acceptance criteria are [X]. Dependencies [Y] are met. Proceeding?'
-Why this matters: The root cause of the image engine Hamming bug was that an agent copied code without understanding context. If every session starts by reading what came before, this cannot happen.
-3.2 Phase 2: Implementation
-During implementation, the agent works ONLY on the confirmed task. Specific rules:
-• Work on exactly one task at a time. Do not fix 'related' bugs unless they directly block the current task.
-• If you discover a bug that does NOT block the current task, log it in the worklog under a BUGS section and continue. Do not let it hijack the session.
-• If a bug DOES block the current task, fix it within the session, document what was fixed and why, and continue with the original task.
-• Write tests for the task. A task is not complete until its acceptance criteria are verified by a test.
-• Do not refactor, restructure, or reorganise code unless the current task explicitly requires it.
-3.3 Phase 3: Verification
-Before declaring a task complete:
-1. Run the full test suite: python -m pytest tests -v
-2. Manually verify the acceptance criteria from the validator for the specific user want(s) this task addresses.
-3. If the task changes a UI element, verify the change matches the Ashisoft reference (for UI tasks) or the user's explicit description (for feature tasks).
-4. Check that no previously-PASS items in the validator have regressed to WARN or FAIL.
-3.4 Phase 4: Session Close
-Every session ends by updating two files:
-worklog.md — Append a session record with:
-• Task ID(s) worked on
-• What was implemented/changed (file paths, function names)
-• What was tested and results
-• Validator items that changed status (e.g., W-02: WARN ? PASS)
-• Any bugs discovered (even if not fixed)
-• Any decisions made (e.g., 'chose X over Y because...')
-• What the next session should pick up
-Validator spreadsheet — Update the Status column for any wants that changed. This is the single source of truth for progress.
-4. The Discovery Protocol
-Mid-implementation discoveries are inevitable. You'll find bugs, architectural problems, and things that don't work as expected. The Discovery Protocol defines exactly how to handle these without derailing the session.
-4.1 The Decision Tree
-Discovery TypeActionTime BudgetEscalationBug blocks current taskFix immediately within session. Document in worklog.Up to 50% of sessionIf >50%, pause and report to SteveBug doesn't block current taskLog in worklog BUGS section. Continue with current task.5 minutes to documentAdd to next sprint if HIGHBetter way to do somethingLog as 'Deferred Idea'. Do NOT implement during current session.2 minutes to documentSteve reviews at sprint boundaryNew feature ideaLog as 'Deferred Idea'. Do NOT add to plan. Do NOT implement.2 minutes to documentSteve reviews at sprint boundaryUser want is actually wrongSTOP. Report to Steve with evidence. Do not self-correct the requirement.Session pausesSteve decides: modify, defer, or closeNeed to restructure planSTOP. This is exactly what caused drift before. Steve must approve any restructuring.Session pausesSteve + AI review together. Document rationale.Table 1: Discovery Decision Tree
-4.2 The 50% Rule
-If a bug or discovery consumes more than 50% of a session's time budget, the agent MUST pause and report to Steve. This is the hard limit that prevents sessions from spiralling into debugging marathons that produce no forward progress. The report must include: what was found, how much time was spent, what remains of the original task, and a recommendation for how to proceed.
-This rule exists because the original implementation suffered from cascading bug fixes where fixing one bug revealed another, consuming entire sessions without completing any planned task. The 50% rule forces a checkpoint before that happens.
-5. Change Control
-Changes to the plan are allowed. But they must be controlled. The following change types require explicit approval, and all changes must be documented.
-5.1 What Requires Steve's Explicit Approval
-1. Adding a new user want (W-45, W-46, etc.) to the validator.
-2. Removing or deprioritising an existing user want.
-3. Changing the sprint order (e.g., swapping Sprint 3 and Sprint 4).
-4. Restructuring any phase or sprint (adding/removing tasks within a sprint).
-5. Changing the technology stack (e.g., switching from CTk to Qt, or from SQLite to PostgreSQL).
-6. Any change that affects more than one sprint simultaneously.
-5.2 What the Agent Can Do Autonomously
-1. Fix bugs within the current task's scope (up to the 50% limit).
-2. Log deferred ideas for Steve's review.
-3. Update the worklog and validator.
-4. Choose implementation details within a task (e.g., which Python library to use for a specific operation).
-5. Add unit tests for any completed task.
-5.3 The Change Log
-Every approved change is recorded in the worklog under a CHANGE CONTROL section with:
-• Date and who requested the change
-• What was changed and why
-• What validator items were affected
-• What the old and new plan states are
-• Steve's explicit approval (quoted from the conversation)
-6. Quality Gates
-A sprint cannot be marked complete until all quality gates pass. These are the minimum criteria for production-quality work.
-6.1 Per-Task Quality Gate
-1. All acceptance criteria from the validator are met.
-2. At least one unit test covers the new functionality.
-3. No previously-passing tests have regressed.
-4. The code runs without errors when the app is launched manually.
-5. The worklog documents what was done and what was tested.
-6.2 Per-Sprint Quality Gate
-1. All tasks in the sprint have passed the per-task quality gate.
-2. Steve has tested the sprint's features manually and confirmed they work.
-3. The validator spreadsheet has been updated with all status changes.
-4. No new bugs were introduced (or all new bugs are logged with severity and owner).
-5. The worklog contains a sprint summary: what was planned, what was delivered, what deviated, and what's next.
-6.3 Final Release Quality Gate
-Before Cerebro v2 can be considered complete, ALL of the following must be true:
-• Every user want (W-01 through W-44) is either PASS or explicitly closed by Steve.
-• Performance benchmarks confirm Czkawka-level scan speed on a 50K-file test set.
-• A full end-to-end manual test has been completed: every scan mode, every selection rule, delete, undo, settings, theme switching.
-• Zero P0/P1 bugs remain open.
-• The worklog contains a complete implementation history from Sprint 1 through completion.
-7. The Accountability Loop
-Governance only works if it's enforced. The accountability loop is a weekly cycle that Steve and the AI agent follow to ensure the plan stays on track.
-7.1 Weekly Review (Every 7 Days)
-Steve opens the validator spreadsheet and reviews:
-1. How many wants moved from FAIL/WARN to PASS this week?
-2. How many wants stayed the same (stalled)?
-3. Were any wants accidentally downgraded (regression)?
-4. How many Deferred Ideas accumulated?
-5. Is the current sprint on track for completion?
-7.2 Sprint Boundary Review
-When a sprint is completed, before starting the next sprint:
-1. Run the full validator check — confirm every item's status is accurate.
-2. Review all Deferred Ideas from the sprint. Decide: add to future sprint, add to validator, or discard.
-3. Review all logged bugs. Assign each to a specific future task or close it.
-4. Confirm the next sprint's task list is still correct (no tasks should have been silently added or removed).
-8. The Session Template
-Every coding session with an AI agent should start with the following prompt template. This ensures the agent has full context and operates within the governance framework.
---- SESSION START TEMPLATE ---
-1. Read /home/z/my-project/worklog.md for full session history.
-2. Read /home/z/my-project/download/Cerebro_v2_Ultimate_Validator.xlsx (Sheet 1) for current status.
-3. Current sprint: [X]. Next task: [Y]. Acceptance criteria: [Z].
-4. Governance rules: One task at a time. 50% bug limit. Log everything. No restructuring.
-5. On completion: update worklog.md AND validator spreadsheet status.
---- END TEMPLATE ---
-This template takes 30 seconds to paste and ensures the agent starts every session with the right context, the right task, and the right constraints. It is the single most effective safeguard against drift.
-9. The Worklog Format
-The worklog at /home/z/my-project/worklog.md is the living memory of the project. Every session appends to it (never overwrites). The format is:
----
-Task ID: R-01
-Agent: [agent name / session identifier]
-Date: YYYY-MM-DD
-Task: [description of what was to be done]
-Work Log:
-- [concrete step 1]
-- [concrete step 2]
-Validator Changes: [e.g., W-02: WARN -> PASS, W-07: no change]
-Bugs Found: [description or 'None']
-Tests: [results]
-Next Session: [what should be picked up next]
-Deferred Ideas: [any ideas logged for later review]
-Stage Summary: [2-3 sentence summary of session outcome]
----
-10. The Five Iron Rules
-If everything else in this document is forgotten, these five rules are sufficient to prevent the drift that derailed v1–v3.2:
-#RuleWhat It Means1One Task, One SessionPick one task from the sprint plan. Complete it. Verify it. Update the validator. That's the session. No multitasking, no context-switching, no 'while I'm here I'll also fix...'2The Validator Never LiesIf the validator says FAIL, it's FAIL — even if you think it works. If it says PASS, it's PASS — even if you're not happy with the implementation quality. The validator is the objective truth. Update it after every session.3Bugs Get Logged, Not ChasedIf you find a bug that doesn't block the current task, log it and move on. The 50% rule prevents bug-hunting from consuming sessions. Bugs are addressed in priority order during dedicated fix sessions, not as interruptions to feature work.4No Silent RestructuringIf the plan needs to change, Steve approves it first and the change is documented. No agent ever reorganises phases, drops features, or adds tasks without explicit approval. This was the #1 cause of drift in v1–v3.2.5The Worklog Is SacredEvery session reads the worklog before starting and appends to it before ending. The worklog is how context survives across sessions. A missing worklog entry means the next session starts blind, and that's how bugs like the Hamming distance issue survived undetected.Table 2: The Five Iron Rules
-These five rules, enforced consistently, are a complete safeguard against the complexity spiral that consumed Cerebro v2's first seven plan iterations. They are simple enough to remember, strict enough to prevent drift, and flexible enough to handle genuine discoveries without derailing progress.
-Cerebro v2 — Governance Protocol
-
-— 2 —
-

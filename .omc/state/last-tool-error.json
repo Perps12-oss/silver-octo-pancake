@@ -1,7 +1,0 @@
-{
-  "tool_name": "Read",
-  "tool_input_preview": "{\"file_path\":\"C:\\\\Users\\\\S8633\\\\OneDrive\\\\Desktop\\\\silver-octo-pancake\\\\Cerebro_v2_Phase_Tracker.txt\",\"offset\":1,\"limit\":100}",
-  "error": "File content (25164 tokens) exceeds maximum allowed tokens (25000). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file.",
-  "timestamp": "2026-04-08T20:12:55.576Z",
-  "retry_count": 2
-}
