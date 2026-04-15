@@ -71,13 +71,25 @@ _current_log_file: Optional[Path] = None
 
 def _safe_logs_dir() -> Path:
     """
-    Prefer <project_root>/logs if possible.
-    Fall back to OS temp if we can't create or write there.
+    Prefer ~/.cerebro/logs.
+    Fall back to <project_root>/logs, then OS temp if needed.
     """
+    home_preferred = Path.home() / ".cerebro" / "logs"
+    try:
+        home_preferred.mkdir(parents=True, exist_ok=True)
+        test = home_preferred / ".write_test"
+        test.write_text("ok", encoding="utf-8")
+        try:
+            test.unlink()
+        except Exception:
+            pass
+        return home_preferred
+    except Exception:
+        pass
+
     here = Path(__file__).resolve()
     root = here.parents[2]  # <root> (.. / .. /)
     preferred = root / "logs"
-
     try:
         preferred.mkdir(parents=True, exist_ok=True)
         test = preferred / ".write_test"

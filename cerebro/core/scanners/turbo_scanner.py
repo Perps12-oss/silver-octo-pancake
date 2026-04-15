@@ -32,8 +32,11 @@ import sqlite3
 import mmap
 import pickle
 
-from cerebro.services.hash_cache import HashCache, StatSignature
 from cerebro.core.models import FileMetadata
+from cerebro.services.hash_cache import HashCache, StatSignature
+from cerebro.services.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 # ============================================================================
@@ -454,11 +457,15 @@ class TurboScanner:
                 pass
         
         # Phase 1: Parallel directory discovery
-        print(f"[Turbo] Phase 1: Discovering files...")
+        logger.info("[Turbo] Phase 1: Discovering files...")
         _emit("discovering", 0, 0)
         discovered_files = self._discover_files_parallel(roots, emit=_emit)
         _emit("discovering", len(discovered_files), len(discovered_files))
-        print(f"[Turbo] Discovered {len(discovered_files)} files in {time.time() - start_time:.2f}s")
+        logger.info(
+            "[Turbo] Discovered %d files in %.2fs",
+            len(discovered_files),
+            time.time() - start_time,
+        )
         
         # Phase 2: Group by size (instant duplicate detection)
         _emit("grouping_by_size", len(discovered_files), len(discovered_files))
@@ -468,31 +475,31 @@ class TurboScanner:
         
         # Filter out unique sizes
         size_groups = {k: v for k, v in size_groups.items() if len(v) >= 2}
-        print(f"[Turbo] Found {len(size_groups)} size groups with potential duplicates")
+        logger.info("[Turbo] Found %d size groups with potential duplicates", len(size_groups))
         
         # Phase 3: Quick hash for size groups (parallel with caching)
         if self.config.use_quick_hash and size_groups:
-            print(f"[Turbo] Phase 2: Computing quick hashes...")
+            logger.info("[Turbo] Phase 2: Computing quick hashes...")
             quick_hash_groups = self._compute_hashes_parallel(
                 size_groups, 
                 quick=True,
                 emit=_emit,
                 stage_name="hashing_partial",
             )
-            print(f"[Turbo] Found {len(quick_hash_groups)} quick-hash groups")
+            logger.info("[Turbo] Found %d quick-hash groups", len(quick_hash_groups))
         else:
             quick_hash_groups = size_groups
         
         # Phase 4: Full hash if needed (parallel with caching)
         if self.config.use_full_hash and quick_hash_groups:
-            print(f"[Turbo] Phase 3: Computing full hashes...")
+            logger.info("[Turbo] Phase 3: Computing full hashes...")
             final_groups = self._compute_hashes_parallel(
                 quick_hash_groups,
                 quick=False,
                 emit=_emit,
                 stage_name="hashing_full",
             )
-            print(f"[Turbo] Found {len(final_groups)} duplicate groups")
+            logger.info("[Turbo] Found %d duplicate groups", len(final_groups))
         else:
             final_groups = quick_hash_groups
         
@@ -544,17 +551,17 @@ class TurboScanner:
         self.stats['files_emitted'] = emitted_count
         self.stats['metadata_errors'] = meta_errors
 
-        print(f"\n[Turbo] Scan complete:")
-        print(f"  - Discovered: {discovered_count}")
-        print(f"  - Candidates: {candidate_count}")
-        print(f"  - Emitted: {emitted_count}")
-        print(f"  - Time: {elapsed:.2f}s")
-        print(f"  - Speed: {discovered_count / elapsed:.0f} files/sec")
-        print(f"  - Cache hits: {self.stats['hash_cache_hits']}")
-        print(f"  - Cache misses: {self.stats['hash_cache_misses']}")
+        logger.info("[Turbo] Scan complete")
+        logger.info("Discovered: %d", discovered_count)
+        logger.info("Candidates: %d", candidate_count)
+        logger.info("Emitted: %d", emitted_count)
+        logger.info("Time: %.2fs", elapsed)
+        logger.info("Speed: %.0f files/sec", discovered_count / elapsed)
+        logger.info("Cache hits: %d", self.stats["hash_cache_hits"])
+        logger.info("Cache misses: %d", self.stats["hash_cache_misses"])
         if self.stats['hash_cache_hits'] + self.stats['hash_cache_misses'] > 0:
             hit_rate = self.stats['hash_cache_hits'] / (self.stats['hash_cache_hits'] + self.stats['hash_cache_misses']) * 100
-            print(f"  - Hit rate: {hit_rate:.1f}%")
+            logger.info("Hit rate: %.1f%%", hit_rate)
         _emit("complete", discovered_count, discovered_count)
     def _discover_files_parallel(
         self,
@@ -627,7 +634,7 @@ class TurboScanner:
                         if emit and discovered_so_far % 1000 <= len(results):
                             emit("discovering", discovered_so_far, 0)
                     except Exception as e:
-                        print(f"[Turbo] Worker error: {e}")
+                        logger.warning("[Turbo] Worker error: %s", e)
                         continue
         else:
             # Fallback to sequential for small scans

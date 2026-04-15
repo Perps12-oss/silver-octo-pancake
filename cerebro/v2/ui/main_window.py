@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import os
 import tkinter as tk
-from typing import Optional, Callable, List, Dict, Any
-from pathlib import Path
 import time
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
 try:
     import customtkinter as ctk
@@ -44,6 +44,9 @@ from cerebro.engines.orchestrator import ScanOrchestrator
 from cerebro.engines.base_engine import (
     ScanProgress, ScanState, DuplicateGroup, DuplicateFile
 )
+from cerebro.services.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class MainWindow(CTk, CTkMessageInterface):
@@ -344,9 +347,9 @@ class MainWindow(CTk, CTkMessageInterface):
             # Remove from folder panel
             updated_folders = folders[:-1]
             self._folder_panel.set_scan_folders(updated_folders)
-            print(f"Removed folder: {path_to_remove}")
+            logger.info("Removed folder from scan list")
         else:
-            print("No folders to remove")
+            logger.debug("Remove folder requested with empty folder list")
 
     def _on_start_search(self) -> None:
         """Handle start search button."""
@@ -376,10 +379,10 @@ class MainWindow(CTk, CTkMessageInterface):
         protected_folders = self._folder_panel.get_protected_folders()
         scan_options = self._folder_panel.get_options()
 
-        print(f"Starting scan in {scan_mode} mode...")
-        print(f"Folders: {[str(f) for f in folders]}")
-        print(f"Protected: {[str(f) for f in protected_folders]}")
-        print(f"Options: {scan_options}")
+        logger.info("Starting scan in %s mode", scan_mode)
+        logger.debug("Scan folders count: %d", len(folders))
+        logger.debug("Protected folders count: %d", len(protected_folders))
+        logger.debug("Scan options: %s", scan_options)
 
         # Collapse left panel so results get full width (user-toggleable in settings)
         if self._app_settings.general.get("auto_collapse", True):
@@ -398,12 +401,12 @@ class MainWindow(CTk, CTkMessageInterface):
             # Start polling for progress updates
             self._start_progress_polling()
         except RuntimeError as e:
-            print(f"Failed to start scan: {e}")
+            logger.warning("Failed to start scan: %s", e)
             self._on_scan_finished()
 
     def _on_stop_search(self) -> None:
         """Handle stop search button."""
-        print("Stopping search...")
+        logger.info("Stopping active scan")
         self._orchestrator.cancel()
         # Stop will be detected via progress callback
         # Don't reset state yet - wait for scan to fully stop
@@ -467,15 +470,15 @@ class MainWindow(CTk, CTkMessageInterface):
 
     def _on_folders_changed(self, folders: List[Path]) -> None:
         """Handle folder list changes."""
-        print(f"Folders changed: {len(folders)} folders")
+        logger.debug("Folders changed: %d folder(s)", len(folders))
 
     def _on_protected_changed(self, folders: List[Path]) -> None:
         """Handle protected folder list changes."""
-        print(f"Protected folders changed: {len(folders)} folders")
+        logger.debug("Protected folders changed: %d folder(s)", len(folders))
 
     def _on_options_changed(self, mode: str, options: dict) -> None:
         """Handle scan options changes."""
-        print(f"Options changed for mode {mode}: {options}")
+        logger.debug("Options changed for mode %s: %s", mode, options)
 
     # ===================
     # SCAN INTEGRATION
@@ -576,8 +579,8 @@ class MainWindow(CTk, CTkMessageInterface):
 
         # Get results from orchestrator
         self._scan_results = self._orchestrator.get_results()
-        print(f"Scan finished with state: {final_state}")
-        print(f"Found {len(self._scan_results)} duplicate groups")
+        logger.info("Scan finished with state %s", final_state)
+        logger.info("Found %d duplicate groups", len(self._scan_results))
 
         # Load results into panel
         if self._scan_results:
@@ -868,7 +871,7 @@ class MainWindow(CTk, CTkMessageInterface):
         if errors:
             msg += f"\n{len(errors)} error(s) — check console."
             for e in errors:
-                print(f"Move error: {e}")
+                logger.warning("Move error: %s", e)
         self.show_info("Move Complete", msg)
         # Refresh results
         self._on_refresh()
@@ -1080,7 +1083,7 @@ class MainWindow(CTk, CTkMessageInterface):
 
     def _on_refresh(self) -> None:
         """Handle F5 refresh."""
-        print("Refresh / re-scan")
+        logger.info("Refresh / re-scan requested")
         # TODO: Re-scan current folders
 
     def _on_escape(self) -> None:
