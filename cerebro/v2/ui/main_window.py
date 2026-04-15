@@ -521,6 +521,22 @@ class MainWindow(CTk, CTkMessageInterface):
             progress = self._orchestrator.get_progress()
             self._update_status_bar(progress)
 
+            # Keep the in-panel progress view in sync with get_progress(). Engines may
+            # throttle cross-thread callbacks (e.g. photos mode every N files) while
+            # files_scanned is updated every iteration for polling.
+            if progress.state == ScanState.SCANNING:
+                elapsed = (
+                    time.time() - self._scan_start_time
+                    if self._scan_start_time > 0
+                    else 0.0
+                )
+                self._results_panel.update_scan_progress(
+                    stage=progress.stage,
+                    files_scanned=progress.files_scanned,
+                    files_total=progress.files_total,
+                    elapsed_seconds=elapsed,
+                )
+
             # Continue polling
             self.after(200, poll)
 

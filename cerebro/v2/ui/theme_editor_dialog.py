@@ -37,7 +37,7 @@ except ImportError:
     CTkSwitch  = tk.Checkbutton
 
 from cerebro.v2.core.design_tokens import Spacing, Typography
-from cerebro.v2.core.theme_bridge_v2 import theme_color, subscribe_to_theme
+from cerebro.v2.core.theme_bridge_v2 import theme_color, subscribe_to_theme, unsubscribe_from_theme
 from cerebro.v2.ui.feedback import FeedbackPanel, confirm_yes_no, show_text_panel
 
 logger = logging.getLogger(__name__)
@@ -310,6 +310,7 @@ class ThemeEditorDialog:
             "Theme Saved",
             f"Theme '{name}' saved and applied.\nLocation: {out}",
         )
+        self._detach_theme_listener()
         self._win.destroy()
 
     def _apply_to_engine(self, preview: bool = False) -> None:
@@ -333,10 +334,22 @@ class ThemeEditorDialog:
         if self._dirty:
             if not confirm_yes_no(self._win, "Discard Changes", "Discard unsaved theme changes?"):
                 return
+        self._detach_theme_listener()
         self._win.destroy()
+
+    def _detach_theme_listener(self) -> None:
+        """Remove theme subscription so global set_theme() cannot touch a destroyed window."""
+        try:
+            unsubscribe_from_theme(self._win, self._apply_theme)
+        except (OSError, ValueError, RuntimeError, AttributeError, TypeError, KeyError, ImportError):
+            pass
 
     def _apply_theme(self) -> None:
         try:
+            if not self._win.winfo_exists():
+                return
             self._win.configure(fg_color=theme_color("base.background"))
+        except tk.TclError:
+            pass
         except (OSError, ValueError, RuntimeError, AttributeError, TypeError, KeyError, ImportError):
             pass

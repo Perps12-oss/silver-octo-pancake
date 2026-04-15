@@ -193,16 +193,19 @@ class ZoomCanvas(CTkCanvas):
             pos_x = center_x - (display_width / 2) + self._view_state.pan_x
             pos_y = center_y - (display_height / 2) + self._view_state.pan_y
 
-            # Clear and draw
+            # Clear and draw (x, y first; image= is required — PhotoImage is not a coordinate)
             self.delete("all")
             self.create_image(
-                self._display_image,
                 pos_x,
                 pos_y,
+                image=self._display_image,
                 anchor="nw",
-                tags="image"
+                tags="image",
             )
 
+        except tk.TclError:
+            # Widget destroyed or canvas torn down mid-render
+            pass
         except (OSError, ValueError, RuntimeError, AttributeError, TypeError, KeyError, ImportError) as e:
             logger.error(f"Failed to render image: {e}")
 

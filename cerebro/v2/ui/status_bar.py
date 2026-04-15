@@ -97,6 +97,9 @@ class StatusBar(CTkFrame):
         self._polling: bool = False
         self._poll_interval: int = 200  # milliseconds
 
+        # Transient status message (e.g. "Settings saved.")
+        self._flash_after_id: Optional[str] = None
+
         # Theme subscription
         subscribe_to_theme(self, self._apply_theme)
 
@@ -221,6 +224,28 @@ class StatusBar(CTkFrame):
             sticky="w"
         )
 
+    def flash_message(self, message: str, duration_ms: int = 2500) -> None:
+        """Show a short message on the scanned line, then restore normal metrics."""
+        if self._flash_after_id is not None:
+            try:
+                self.after_cancel(self._flash_after_id)
+            except (tk.TclError, ValueError):
+                pass
+            self._flash_after_id = None
+        try:
+            self._scanned_label.configure(
+                text=message,
+                text_color=theme_color("feedback.info"),
+            )
+        except (tk.TclError, OSError, ValueError, RuntimeError, AttributeError):
+            return
+
+        def _restore() -> None:
+            self._flash_after_id = None
+            self._refresh_labels()
+
+        self._flash_after_id = self.after(duration_ms, _restore)
+
     def update_metrics(self, metrics: StatusBarMetrics) -> None:
         """
         Update all displayed metrics.
@@ -228,6 +253,12 @@ class StatusBar(CTkFrame):
         Args:
             metrics: New metrics to display.
         """
+        if self._flash_after_id is not None:
+            try:
+                self.after_cancel(self._flash_after_id)
+            except (tk.TclError, ValueError):
+                pass
+            self._flash_after_id = None
         self._metrics = metrics.clone()
         self._refresh_labels()
 

@@ -224,12 +224,17 @@ class TurboFileEngine(BaseEngine):
 
         state = _STAGE_MAP.get(stage, ScanState.SCANNING)
         self._state = state
-        scanned = processed if stage == "discovering" else self._progress.files_scanned
+        prev = self._progress
+        # Keep a monotonic scan counter; hashing phases report progress for the current
+        # batch only, which can be smaller than the discovery count — never shrink total.
+        scanned = max(processed, prev.files_scanned)
+        ft = total if total > 0 else (prev.files_total or 0)
+        ft = max(ft, prev.files_total or 0, scanned)
 
         self._progress = ScanProgress(
             state=state,
-            files_scanned=max(scanned, self._progress.files_scanned),
-            files_total=total if total > 0 else self._progress.files_total,
+            files_scanned=scanned,
+            files_total=ft,
             stage=stage,
         )
         self._emit_progress()

@@ -167,6 +167,7 @@ class ImageDedupEngine(BaseEngine):
         self._scan_thread: Optional[threading.Thread] = None
         self._start_time: float = 0
         self._worker_pool: Optional[ThreadPoolExecutor] = None
+        self._callback: Optional[Callable[[ScanProgress], None]] = None
 
         # Default options
         self._default_options = {
@@ -293,7 +294,13 @@ class ImageDedupEngine(BaseEngine):
         """Run scan in a background thread."""
         try:
             image_files = self._get_image_files()
-            cb(ScanProgress(state=ScanState.SCANNING, files_total=len(image_files)))
+            self._progress = ScanProgress(
+                state=ScanState.SCANNING,
+                files_total=len(image_files),
+                files_scanned=0,
+                stage="analyzing_images",
+            )
+            cb(dataclasses.replace(self._progress))
             groups = self._group_images(image_files)
             self._results = groups if groups else []
             self._state = ScanState.COMPLETED
@@ -311,10 +318,24 @@ class ImageDedupEngine(BaseEngine):
                 current_file=f"Error: {str(e)}"
             ))
 
+    def _needs_image_dimensions(self) -> bool:
+        """True if options require reading width/height from each candidate file."""
+        o = self._options
+        if int(o.get("min_resolution", 0) or 0) > 0:
+            return True
+        if int(o.get("max_resolution", 0) or 0) > 0:
+            return True
+        if int(o.get("min_width", 0) or 0) > 0:
+            return True
+        if int(o.get("min_height", 0) or 0) > 0:
+            return True
+        return False
+
     def _get_image_files(self) -> List[Path]:
         """Get all image files from scan folders, excluding protected."""
         image_files = []
         image_ext_lower = {ext.lower() for ext in IMAGE_EXTENSIONS}
+        need_dims = self._needs_image_dimensions()
 
         for folder in self._folders:
             try:
@@ -332,13 +353,14 @@ class ImageDedupEngine(BaseEngine):
 
                         # Check extension
                         if path.suffix.lower() in image_ext_lower:
-                            # Check resolution filter
-                            result = self._get_image_resolution(path)
-                            if result is None:
-                                continue
-                            width, height = result
-                            if self._passes_resolution_filter(width, height):
-                                image_files.append(path)
+                            if need_dims:
+                                result = self._get_image_resolution(path)
+                                if result is None:
+                                    continue
+                                width, height = result
+                                if not self._passes_resolution_filter(width, height):
+                                    continue
+                            image_files.append(path)
 
             except PermissionError as e:
                 logger.warning(f"Permission denied: {e}")
@@ -423,6 +445,8 @@ class ImageDedupEngine(BaseEngine):
 
         total_files = len(image_files)
         processed = 0
+        self._progress.stage = "analyzing_images"
+        self._progress.files_total = total_files
 
         for idx, image_path in enumerate(image_files):
             if self._cancel_event.is_set():
@@ -471,11 +495,11 @@ class ImageDedupEngine(BaseEngine):
             }
             records.append(record)
 
-            # Update progress
+            # Update progress (UI also polls get_progress() every ~200ms)
             self._progress.files_scanned = processed
             self._progress.current_file = str(image_path)
 
-            if processed % 100 == 0:
+            if processed % 25 == 0 or processed == total_files:
                 if self._callback:
                     self._callback(dataclasses.replace(self._progress))
 

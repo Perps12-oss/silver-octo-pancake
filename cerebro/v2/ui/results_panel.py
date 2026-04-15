@@ -53,6 +53,7 @@ def _format_duration(seconds: float) -> str:
 _STAGE_LABELS: Dict[str, str] = {
     "": "Discovering files...",
     "discovering": "Discovering files...",
+    "analyzing_images": "Analyzing images...",
     "grouping_by_size": "Grouping by size...",
     "hashing_partial": "Computing partial hashes...",
     "hashing_full": "Computing full hashes...",
