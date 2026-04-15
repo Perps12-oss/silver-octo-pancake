@@ -605,3 +605,30 @@
 01:40:05 [INFO] CEREBRO: [UI] Navigated to mission
 01:40:07 [INFO] CEREBRO: [UI] Navigated to scan
 01:40:09 [INFO] CEREBRO: [UI] Navigated to history
+10:32:21 [INFO] CEREBRO.main: ============================================================
+10:32:21 [INFO] CEREBRO.main: CEREBRO v5.0.0
+10:32:21 [INFO] CEREBRO.main: ============================================================
+10:32:21 [INFO] CEREBRO.main: Python: 3.14.3 (tags/v3.14.3:323c59a, Feb  3 2026, 16:04:56) [MSC v.1944 64 bit (AMD64)]
+10:32:22 [INFO] CEREBRO.main: Platform: Windows-11-10.0.26200-SP0
+10:32:22 [INFO] CEREBRO.main: Logging to: C:\Users\S8633\OneDrive\Desktop\silver-octo-pancake\logs\cerebro.log
+10:32:22 [INFO] CEREBRO.main: ✓ Crash handler installed (0.184s)
+10:32:22 [INFO] CEREBRO.main: ✓ Environment validated (0.186s)
+10:32:22 [INFO] CEREBRO.main: PySide6 version 6.11.0 detected
+10:32:22 [INFO] CEREBRO.main: ✓ Dependencies validated (0.394s)
+10:32:22 [INFO] CEREBRO.main: Configuration loaded (theme: dark)
+10:32:22 [INFO] CEREBRO.main: ✓ Configuration loaded (0.400s)
+10:32:22 [INFO] CEREBRO.main: ✓ PySide6 imported (0.628s)
+10:32:22 [INFO] CEREBRO.main: ✓ Qt application created (0.706s)
+10:32:22 [INFO] CEREBRO.main: ✓ MainWindow imported (1.064s)
+10:32:23 [ERROR] CEREBRO.main: Failed to create MainWindow: 'ScanPage' object has no attribute 'navigate_requested'
+10:32:23 [ERROR] CEREBRO.main: Traceback (most recent call last):
+  File "C:\Users\S8633\OneDrive\Desktop\silver-octo-pancake\main_improved.py", line 293, in run
+    window = MainWindow()
+  File "C:\Users\S8633\OneDrive\Desktop\silver-octo-pancake\cerebro\ui\main_window.py", line 216, in __init__
+    self._build_pages()
+    ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\S8633\OneDrive\Desktop\silver-octo-pancake\cerebro\ui\main_window.py", line 389, in _build_pages
+    scan_page.navigate_requested.connect(self.navigate_to)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'ScanPage' object has no attribute 'navigate_requested'
+
