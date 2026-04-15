@@ -36,6 +36,7 @@ class StatusBarMetrics:
         groups_found: int = 0,
         bytes_reclaimable: int = 0,
         elapsed_seconds: float = 0.0,
+        eta_seconds: Optional[float] = None,
         is_scanning: bool = False,
         progress_percent: float = 0.0
     ):
@@ -44,6 +45,7 @@ class StatusBarMetrics:
         self.groups_found = groups_found
         self.bytes_reclaimable = bytes_reclaimable
         self.elapsed_seconds = elapsed_seconds
+        self.eta_seconds = eta_seconds
         self.is_scanning = is_scanning
         self.progress_percent = progress_percent
 
@@ -55,6 +57,7 @@ class StatusBarMetrics:
             groups_found=self.groups_found,
             bytes_reclaimable=self.bytes_reclaimable,
             elapsed_seconds=self.elapsed_seconds,
+            eta_seconds=self.eta_seconds,
             is_scanning=self.is_scanning,
             progress_percent=self.progress_percent
         )
@@ -85,6 +88,7 @@ class StatusBar(CTkFrame):
         self._groups_label: Optional[CTkLabel] = None
         self._reclaimable_label: Optional[CTkLabel] = None
         self._elapsed_label: Optional[CTkLabel] = None
+        self._eta_label: Optional[CTkLabel] = None
         self._progress_bar: Optional[CTkProgressBar] = None
 
         # Polling
@@ -140,6 +144,13 @@ class StatusBar(CTkFrame):
             text_color=theme_color("status.foreground")
         )
 
+        self._eta_label = CTkLabel(
+            self,
+            text="ETA: —",
+            font=Typography.FONT_MONO,
+            text_color=theme_color("status.foreground")
+        )
+
         # Progress bar (subtle, thin)
         self._progress_bar = CTkProgressBar(
             self,
@@ -166,7 +177,8 @@ class StatusBar(CTkFrame):
         self.columnconfigure(4, weight=0)  # Reclaimable
         self.columnconfigure(5, weight=0)  # Spacer
         self.columnconfigure(6, weight=0)  # Elapsed
-        self.columnconfigure(7, weight=0)  # Progress bar
+        self.columnconfigure(7, weight=0)  # ETA
+        self.columnconfigure(8, weight=0)  # Progress bar
 
         # Row settings
         self.rowconfigure(0, weight=1)
@@ -198,6 +210,11 @@ class StatusBar(CTkFrame):
 
         self._elapsed_label.grid(
             row=0, column=6,
+            padx=Spacing.MD, pady=(0, 0),
+            sticky="w"
+        )
+        self._eta_label.grid(
+            row=0, column=7,
             padx=Spacing.MD, pady=(0, 0),
             sticky="w"
         )
@@ -244,13 +261,17 @@ class StatusBar(CTkFrame):
         elapsed = self._format_time(self._metrics.elapsed_seconds)
         self._elapsed_label.configure(text=f"Elapsed: {elapsed}")
 
+        # Format ETA
+        eta = "—" if self._metrics.eta_seconds is None else self._format_time(self._metrics.eta_seconds)
+        self._eta_label.configure(text=f"ETA: {eta}")
+
     def _show_progress_bar(self) -> None:
         """Show progress bar in grid."""
         if hasattr(self._progress_bar, "grid_info"):
             info = self._progress_bar.grid_info()
             if not info:
                 self._progress_bar.grid(
-                    row=0, column=7,
+                    row=0, column=8,
                     padx=Spacing.LG, pady=(0, 0),
                     sticky="e"
                 )
@@ -298,6 +319,11 @@ class StatusBar(CTkFrame):
     def update_elapsed(self, seconds: float) -> None:
         """Update elapsed time."""
         self._metrics.elapsed_seconds = seconds
+        self._refresh_labels()
+
+    def update_eta(self, seconds: Optional[float]) -> None:
+        """Update ETA (None clears ETA)."""
+        self._metrics.eta_seconds = seconds
         self._refresh_labels()
 
     def update_progress(self, percent: float) -> None:
@@ -358,6 +384,7 @@ class StatusBar(CTkFrame):
         self._groups_label.configure(text_color=fg)
         self._reclaimable_label.configure(text_color=success)
         self._elapsed_label.configure(text_color=fg)
+        self._eta_label.configure(text_color=fg)
 
         self._progress_bar.configure(
             progress_color=accent,

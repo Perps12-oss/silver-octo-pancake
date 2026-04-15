@@ -85,6 +85,7 @@ class MainWindow(CTk, CTkMessageInterface):
 
         # Scan state
         self._scan_start_time: float = 0.0
+        self._eta_smoothed: float = 0.0
         self._polling_enabled: bool = False
         self._selected_file_ids: List[str] = []  # For preview panel
 
@@ -361,9 +362,14 @@ class MainWindow(CTk, CTkMessageInterface):
 
         # Reset state
         self._scan_start_time = time.time()
+        self._eta_smoothed = 0.0
         self._scanning = True
         self._toolbar.set_scanning(True)
         self._status_bar.set_scanning(True)
+        self._status_bar.start_polling(
+            lambda: self._status_bar.update_elapsed(time.time() - self._scan_start_time),
+            interval=200,
+        )
 
         # Get scan parameters
         scan_mode = self.get_scan_mode()
@@ -500,6 +506,11 @@ class MainWindow(CTk, CTkMessageInterface):
             progress: ScanProgress object.
         """
         elapsed = time.time() - self._scan_start_time if self._scan_start_time > 0 else 0.0
+        eta = self._compute_eta(
+            files_scanned=progress.files_scanned,
+            files_total=progress.files_total,
+            elapsed=elapsed,
+        )
 
         metrics = StatusBarMetrics(
             files_scanned=progress.files_scanned,
@@ -507,6 +518,7 @@ class MainWindow(CTk, CTkMessageInterface):
             groups_found=progress.groups_found,
             bytes_reclaimable=progress.bytes_reclaimable,
             elapsed_seconds=elapsed,
+            eta_seconds=eta,
             is_scanning=(progress.state == ScanState.SCANNING),
             progress_percent=min(100.0, elapsed * 5) if progress.files_total > 0 else 0.0
         )
@@ -552,6 +564,7 @@ class MainWindow(CTk, CTkMessageInterface):
         """
         # Stop polling
         self._stop_progress_polling()
+        self._status_bar.stop_polling()
 
         # Update UI state
         self._scanning = False
@@ -596,9 +609,36 @@ class MainWindow(CTk, CTkMessageInterface):
                 groups_found=len(self._scan_results),
                 bytes_reclaimable=reclaimable,
                 elapsed_seconds=elapsed,
+                eta_seconds=0.0,
                 is_scanning=False,
                 progress_percent=100.0,
             ))
+
+    def _compute_eta(self, files_scanned: int, files_total: int, elapsed: float) -> Optional[float]:
+        """Estimate scan ETA using files/sec with lightweight smoothing."""
+        if files_total <= 0 or files_scanned <= 0 or elapsed <= 0:
+            return None
+        if files_scanned >= files_total:
+            return 0.0
+
+        # Avoid noisy ETA during scan warmup.
+        if files_scanned < 100 and elapsed < 2.0:
+            return None
+
+        rate = files_scanned / elapsed
+        if rate <= 0:
+            return None
+
+        remaining = max(0, files_total - files_scanned)
+        raw_eta = remaining / rate
+        if raw_eta <= 0:
+            return 0.0
+
+        if self._eta_smoothed <= 0:
+            self._eta_smoothed = raw_eta
+        else:
+            self._eta_smoothed = (0.7 * self._eta_smoothed) + (0.3 * raw_eta)
+        return self._eta_smoothed
 
     def _load_results_to_panel(self) -> None:
         """Load scan results into both views (list + thumbnail grid)."""
