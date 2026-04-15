@@ -37,6 +37,7 @@ from cerebro.v2.ui.settings_dialog import SettingsDialog, Settings, get_settings
 from cerebro.v2.ui.folder_panel import FolderPanel
 from cerebro.v2.ui.results_panel import ResultsPanel
 from cerebro.v2.ui.preview_panel import PreviewPanel
+from cerebro.v2.ui.widgets.thumbnail_grid import ThumbnailGrid
 from cerebro.v2.ui.feedback import CTkMessageInterface, FeedbackPanel, confirm_yes_no, show_text_panel
 from cerebro.v2.core.deletion_history_db import log_deletion_event
 from cerebro.engines.orchestrator import ScanOrchestrator
@@ -78,6 +79,8 @@ class MainWindow(CTk, CTkMessageInterface):
         self._current_scan_mode: str = "files"
         self._scanning: bool = False
         self._preview_collapsed: bool = False
+        self._view_mode: str = "list"
+        self._thumbnail_grid_dirty: bool = True
         self._app_settings: Settings = Settings.load(get_settings_path())
 
         # Scan state
@@ -174,6 +177,7 @@ class MainWindow(CTk, CTkMessageInterface):
         self._toolbar.on_move_to(self._on_move_to)
         self._toolbar.on_settings(self._on_settings)
         self._toolbar.on_help(self._on_help)
+        self._toolbar.on_view_mode_changed(self._on_view_mode_changed)
 
     def _build_mode_tabs(self) -> None:
         """Build and install mode tabs."""
@@ -191,7 +195,7 @@ class MainWindow(CTk, CTkMessageInterface):
         try:
             self._horizontal_paned = CTkPanedWindow(
                 self._content_container,
-                orientation="horizontal"
+                orient=tk.HORIZONTAL
             )
         except TypeError:
             # Fallback to standard PanedWindow
@@ -243,6 +247,7 @@ class MainWindow(CTk, CTkMessageInterface):
 
         self._results_panel = ResultsPanel(self._center_panel_frame)
         self._results_panel.pack(fill="both", expand=True)
+        self._thumbnail_grid = ThumbnailGrid(self._center_panel_frame)
 
         # Wire folder panel callbacks
         self._folder_panel.on_folders_changed(self._on_folders_changed)
@@ -254,6 +259,9 @@ class MainWindow(CTk, CTkMessageInterface):
         self._results_panel.on_selection_changed(self._on_selection_changed)
         self._results_panel.on_request_add_folder(self._on_add_path)
         self._results_panel.on_request_start_search(self._on_start_search)
+        self._thumbnail_grid.on_selection_changed(self._on_selection_changed)
+        self._thumbnail_grid.on_request_add_folder(self._on_add_path)
+        self._thumbnail_grid.on_request_start_search(self._on_start_search)
 
     def _build_preview_panel(self) -> None:
         """Build and install collapsible preview panel."""
@@ -593,7 +601,7 @@ class MainWindow(CTk, CTkMessageInterface):
             ))
 
     def _load_results_to_panel(self) -> None:
-        """Load scan results into the results panel."""
+        """Load scan results into both views (list + thumbnail grid)."""
         # Pass core DuplicateGroup objects directly — results_panel uses DuplicateFile attributes.
         # For large_files mode, provide total scanned bytes so the panel can show % of disk.
         from cerebro.v2.ui.mode_tabs import ScanMode
@@ -603,6 +611,11 @@ class MainWindow(CTk, CTkMessageInterface):
             )
             self._results_panel._total_scan_bytes = total_bytes
         self._results_panel.load_results(self._scan_results)
+        # Building thousands of thumbnail cards can block UI.
+        # Only hydrate grid eagerly when grid view is active; otherwise defer.
+        self._thumbnail_grid_dirty = True
+        if self._view_mode == "grid":
+            self.after(0, self._hydrate_thumbnail_grid_if_needed)
 
     def _format_bytes(self, bytes_count: int) -> str:
         """Format bytes to human-readable string."""
@@ -625,6 +638,40 @@ class MainWindow(CTk, CTkMessageInterface):
     # ===================
     # PREVIEW INTEGRATION
     # ===================
+
+    def _on_view_mode_changed(self, mode: str) -> None:
+        """Swap center content between list table and thumbnail grid."""
+        if mode not in ("list", "grid") or mode == self._view_mode:
+            return
+        self._view_mode = mode
+        try:
+            self._results_panel.pack_forget()
+            self._thumbnail_grid.pack_forget()
+        except Exception:
+            pass
+        if mode == "grid":
+            self._thumbnail_grid.pack(fill="both", expand=True)
+            self.after(0, self._hydrate_thumbnail_grid_if_needed)
+            try:
+                self._preview_panel.set_layout_mode("ashisoft")
+            except Exception:
+                pass
+        else:
+            self._results_panel.pack(fill="both", expand=True)
+            try:
+                self._preview_panel.set_layout_mode("compact")
+            except Exception:
+                pass
+
+    def _hydrate_thumbnail_grid_if_needed(self) -> None:
+        """Lazily load scan results into thumbnail grid when required."""
+        if not self._thumbnail_grid_dirty:
+            return
+        try:
+            self._thumbnail_grid.load_results(self._scan_results)
+            self._thumbnail_grid_dirty = False
+        except Exception:
+            pass
 
     def _on_keep_a(self) -> None:
         """Handle keep file A button in preview."""
@@ -716,6 +763,12 @@ class MainWindow(CTk, CTkMessageInterface):
         self._scan_results.clear()
         if hasattr(self, '_results_panel') and self._results_panel:
             self._results_panel.clear()
+        if hasattr(self, '_thumbnail_grid') and self._thumbnail_grid:
+            try:
+                self._thumbnail_grid.clear()
+            except Exception:
+                pass
+        self._thumbnail_grid_dirty = True
 
         # Update left panel scan options for this mode
         if hasattr(self, '_folder_panel') and self._folder_panel:

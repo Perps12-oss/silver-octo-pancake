@@ -32,6 +32,7 @@ except ImportError:
 from cerebro.v2.core.design_tokens import Spacing, Typography, Dimensions
 from cerebro.v2.core.theme_bridge_v2 import theme_color, subscribe_to_theme
 from cerebro.v2.ui.widgets.zoom_canvas import ZoomCanvas
+from cerebro.v2.ui.widgets.metadata_table import MetadataTable
 
 # Image extensions that should show the canvas
 _IMAGE_EXTENSIONS = {
@@ -203,6 +204,8 @@ class PreviewPanel(CTkFrame):
         self._file_a: Optional[Dict[str, Any]] = None
         self._file_b: Optional[Dict[str, Any]] = None
         self._sync_enabled: bool = True
+        self._layout_mode: str = "compact"
+        self._metadata_table: Optional[MetadataTable] = None
 
         subscribe_to_theme(self, self._apply_theme)
         self._build()
@@ -277,6 +280,19 @@ class PreviewPanel(CTkFrame):
             font=Typography.FONT_SM,
             text_color=theme_color("base.foregroundMuted"))
         self._hint.pack(expand=True)
+
+        # Ashisoft alternate content (always-visible style)
+        self._ashisoft_content = CTkFrame(self, fg_color=theme_color("preview.background"))
+        self._ashisoft_canvas = ZoomCanvas(self._ashisoft_content, bg_color=theme_color("preview.background"))
+        self._ashisoft_canvas.pack(fill="both", expand=True, padx=Spacing.XS, pady=(Spacing.XS, Spacing.XS))
+        self._ashisoft_no_preview = CTkLabel(
+            self._ashisoft_content,
+            text="Select a file in the results to preview it here.",
+            font=Typography.FONT_SM,
+            text_color=theme_color("base.foregroundMuted"),
+        )
+        self._metadata_table = MetadataTable(self._ashisoft_content)
+        self._metadata_table.pack(fill="x", side="bottom", padx=Spacing.XS, pady=(0, Spacing.XS))
 
     # ------------------------------------------------------------------
     # Collapse / expand
@@ -370,6 +386,63 @@ class PreviewPanel(CTkFrame):
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+    def _update_ashisoft_view(self) -> None:
+        if self._metadata_table is None:
+            return
+        target = self._file_a or self._file_b
+        if not target:
+            try:
+                self._ashisoft_canvas.pack_forget()
+                self._ashisoft_no_preview.pack(expand=True)
+            except Exception:
+                pass
+            self._metadata_table.clear()
+            return
+        path_str = target.get("path", "")
+        path = Path(path_str) if path_str else None
+        is_image = (path and path.suffix.lower() in _IMAGE_EXTENSIONS and path.exists())
+        try:
+            if is_image:
+                self._ashisoft_no_preview.pack_forget()
+                self._ashisoft_canvas.pack(fill="both", expand=True, padx=Spacing.XS, pady=(Spacing.XS, Spacing.XS), before=self._metadata_table)
+                self._ashisoft_canvas.load_image(path, fit=True)
+            else:
+                self._ashisoft_canvas.pack_forget()
+                self._ashisoft_no_preview.pack(expand=True, before=self._metadata_table)
+        except Exception:
+            pass
+        self._metadata_table.load(path)
+
+    def set_layout_mode(self, mode: str) -> None:
+        if mode not in ("compact", "ashisoft") or mode == self._layout_mode:
+            return
+        self._layout_mode = mode
+        try:
+            self._content.pack_forget()
+            self._ashisoft_content.pack_forget()
+        except Exception:
+            pass
+        if mode == "ashisoft":
+            try:
+                self._header.pack_forget()
+            except Exception:
+                pass
+            self._ashisoft_content.pack(fill="both", expand=True)
+            self._collapsed = False
+            self._update_ashisoft_view()
+        else:
+            try:
+                self._header.pack(fill="x", before=self._ashisoft_content)
+            except Exception:
+                try:
+                    self._header.pack(fill="x")
+                except Exception:
+                    pass
+            if not self._collapsed:
+                self._content.pack(fill="both", expand=True)
+
+    def get_layout_mode(self) -> str:
+        return self._layout_mode
 
     def load_single(self, file_data: Optional[Dict[str, Any]]) -> None:
         """Load one file (clears side B). Pass None to clear."""
@@ -385,6 +458,7 @@ class PreviewPanel(CTkFrame):
             self._side_b.clear()
 
         self._update_layout()
+        self._update_ashisoft_view()
 
     def load_comparison(
         self,
@@ -409,6 +483,7 @@ class PreviewPanel(CTkFrame):
             self._auto_expand()
 
         self._update_layout()
+        self._update_ashisoft_view()
 
     def load_file_a(self, file_data: Optional[Dict[str, Any]]) -> None:
         self._file_a = file_data
@@ -418,6 +493,7 @@ class PreviewPanel(CTkFrame):
         else:
             self._side_a.clear()
         self._update_layout()
+        self._update_ashisoft_view()
 
     def load_file_b(self, file_data: Optional[Dict[str, Any]]) -> None:
         self._file_b = file_data
@@ -427,6 +503,7 @@ class PreviewPanel(CTkFrame):
         else:
             self._side_b.clear()
         self._update_layout()
+        self._update_ashisoft_view()
 
     def clear(self) -> None:
         """Clear all previews."""
@@ -435,6 +512,7 @@ class PreviewPanel(CTkFrame):
         self._side_a.clear()
         self._side_b.clear()
         self._update_layout()
+        self._update_ashisoft_view()
 
     def get_file_a(self) -> Optional[Dict[str, Any]]:
         return self._file_a

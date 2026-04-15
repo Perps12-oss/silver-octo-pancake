@@ -83,6 +83,8 @@ class Toolbar(CTkFrame):
         self._on_move_to:         Optional[Callable[[], None]] = None
         self._on_settings:        Optional[Callable[[], None]] = None
         self._on_help:            Optional[Callable[[], None]] = None
+        self._on_view_mode_changed: Optional[Callable[[str], None]] = None
+        self._view_mode: str = "list"
 
         # Widgets (set in _build_widgets)
         self._add_path_btn:  Optional[CTkButton] = None
@@ -95,6 +97,9 @@ class Toolbar(CTkFrame):
         self._delete_btn:    Optional[CTkButton] = None
         self._move_to_btn:   Optional[CTkButton] = None
         self._sep3:          Optional[CTkLabel]  = None
+        self._view_list_btn: Optional[CTkButton] = None
+        self._view_grid_btn: Optional[CTkButton] = None
+        self._sep_view:      Optional[CTkLabel]  = None
         self._settings_btn:  Optional[CTkButton] = None
         self._help_btn:      Optional[CTkButton] = None
 
@@ -182,6 +187,23 @@ class Toolbar(CTkFrame):
         self._sep3 = CTkLabel(self, text="│", width=20,
                               text_color=bdr, font=Typography.FONT_LG)
 
+        self._view_list_btn = CTkButton(
+            self, text="☰ List",
+            width=72, height=h, font=fw,
+            fg_color=acc, hover_color=accH,
+            border_width=0, corner_radius=rad,
+            command=lambda: self._set_view_mode("list"),
+        )
+        self._view_grid_btn = CTkButton(
+            self, text="▦ Grid",
+            width=72, height=h, font=fw,
+            fg_color=sec, hover_color=secH,
+            border_width=1, border_color=bdr, corner_radius=rad,
+            command=lambda: self._set_view_mode("grid"),
+        )
+        self._sep_view = CTkLabel(self, text="│", width=20,
+                                  text_color=bdr, font=Typography.FONT_LG)
+
         self._settings_btn = CTkButton(
             self, text="⚙",
             width=36, height=h, font=Typography.FONT_LG,
@@ -212,6 +234,8 @@ class Toolbar(CTkFrame):
             self._sep2,
             self._auto_mark_btn, self._delete_btn, self._move_to_btn,
             self._sep3,
+            self._view_list_btn, self._view_grid_btn,
+            self._sep_view,
             self._settings_btn, self._help_btn,
         ):
             btn.pack(side="left", padx=pad, pady=(Spacing.SM, Spacing.SM))
@@ -337,6 +361,41 @@ class Toolbar(CTkFrame):
     def on_settings(self, cb: Callable[[], None]) -> None:        self._on_settings = cb
     def on_help(self, cb: Callable[[], None]) -> None:            self._on_help = cb
 
+    def on_view_mode_changed(self, cb: Callable[[str], None]) -> None:
+        self._on_view_mode_changed = cb
+
+    def get_view_mode(self) -> str:
+        return self._view_mode
+
+    def set_view_mode(self, mode: str, fire_callback: bool = False) -> None:
+        if mode not in ("list", "grid"):
+            return
+        self._view_mode = mode
+        acc = theme_color("button.primary")
+        accH = theme_color("button.primaryHover")
+        sec = theme_color("button.secondary")
+        secH = theme_color("button.secondaryHover")
+        bdr = theme_color("toolbar.border")
+        try:
+            if mode == "list":
+                self._view_list_btn.configure(fg_color=acc, hover_color=accH, border_width=0)
+                self._view_grid_btn.configure(fg_color=sec, hover_color=secH, border_width=1, border_color=bdr)
+            else:
+                self._view_grid_btn.configure(fg_color=acc, hover_color=accH, border_width=0)
+                self._view_list_btn.configure(fg_color=sec, hover_color=secH, border_width=1, border_color=bdr)
+        except Exception:
+            pass
+        if fire_callback and self._on_view_mode_changed:
+            try:
+                self._on_view_mode_changed(mode)
+            except Exception:
+                pass
+
+    def _set_view_mode(self, mode: str) -> None:
+        if mode == self._view_mode:
+            return
+        self.set_view_mode(mode, fire_callback=True)
+
     # ------------------------------------------------------------------
     # Folder helpers (kept for backwards compatibility)
     # ------------------------------------------------------------------
@@ -372,7 +431,7 @@ class Toolbar(CTkFrame):
             try: btn.configure(fg_color=theme_color(fg_slot), hover_color=theme_color(hov_slot))
             except Exception: pass
 
-        for sep in (self._sep1, self._sep2, self._sep3):
+        for sep in (self._sep1, self._sep2, self._sep3, self._sep_view):
             try: sep.configure(text_color=theme_color("toolbar.border"))
             except Exception: pass
 

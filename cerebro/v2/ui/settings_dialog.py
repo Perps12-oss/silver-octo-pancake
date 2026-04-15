@@ -422,8 +422,7 @@ class SettingsDialog(CTkToplevel):
             tab,
             from_=10,
             to=18,
-            number_of_steps=8,
-            font=Typography.FONT_SM
+            number_of_steps=8
         )
         font_size_slider.set(self._settings.appearance.get("font_size", 13))
         font_size_slider.pack(fill="x", padx=Spacing.SM, pady=(Spacing.XS, Spacing.MD))
@@ -489,8 +488,7 @@ class SettingsDialog(CTkToplevel):
             tab,
             from_=0,
             to=16,
-            number_of_steps=16,
-            font=Typography.FONT_SM
+            number_of_steps=16
         )
         threads_slider.set(self._settings.performance.get("max_threads", 0))
         threads_slider.pack(fill="x", padx=Spacing.SM, pady=(Spacing.XS, Spacing.MD))
@@ -532,8 +530,7 @@ class SettingsDialog(CTkToplevel):
             tab,
             from_=50,
             to=5000,
-            number_of_steps=99,
-            font=Typography.FONT_SM
+            number_of_steps=99
         )
         cache_slider.set(self._settings.performance.get("hash_cache_max_mb", 500))
         cache_slider.pack(fill="x", padx=Spacing.SM, pady=(Spacing.XS, Spacing.MD))

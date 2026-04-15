@@ -40,8 +40,9 @@ class CheckTreeview(ttk.Treeview):
     def __init__(self, master=None, **kwargs):
         """Initialize check treeview."""
         # Add checkbox column to columns
-        columns = kwargs.get("columns", [])
-        columns = [self.CHECK_COLUMN] + list(columns)
+        original_columns = kwargs.pop("columns", [])
+        columns = [self.CHECK_COLUMN] + list(original_columns)
+        kwargs.pop("show", None)
 
         # Set show='headings' to hide headers
         super().__init__(
@@ -123,11 +124,22 @@ class CheckTreeview(ttk.Treeview):
         Returns:
             The item ID.
         """
+        # With show="headings", row text is not rendered from the tree column.
+        # Put group label into the first visible data column ("name"), keeping
+        # checkbox column empty so grouped results are actually visible.
+        col_count = len(self["columns"])
+        group_values = [""] * col_count
+        if col_count >= 2:
+            group_values[1] = text
+        elif col_count == 1:
+            group_values[0] = text
+
         item_id = self.insert(
             parent,
             "end",
             iid=group_id,
-            text=text,
+            values=tuple(group_values),
+            open=True,
             tags="group_header",
             **kwargs
         )

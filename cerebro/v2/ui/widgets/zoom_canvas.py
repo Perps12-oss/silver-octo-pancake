@@ -63,6 +63,10 @@ class ZoomCanvas(CTkCanvas):
 
     def __init__(self, master=None, **kwargs):
         """Initialize zoom canvas."""
+        # CustomTkinter-style argument compatibility
+        bg_color = kwargs.pop("bg_color", None)
+        if bg_color is not None and "bg" not in kwargs and "background" not in kwargs:
+            kwargs["bg"] = bg_color
         super().__init__(master, **kwargs)
 
         # Image data

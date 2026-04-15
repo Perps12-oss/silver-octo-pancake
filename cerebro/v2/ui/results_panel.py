@@ -15,9 +15,11 @@ try:
     import customtkinter as ctk
     CTkFrame = ctk.CTkFrame
     CTkLabel = ctk.CTkLabel
+    CTkButton = ctk.CTkButton
 except ImportError:
     CTkFrame = tk.Frame
     CTkLabel = tk.Label
+    CTkButton = tk.Button
 
 from cerebro.v2.core.design_tokens import Spacing, Typography, Dimensions
 from cerebro.v2.core.theme_bridge_v2 import theme_color, subscribe_to_theme
@@ -627,7 +629,7 @@ class ResultsPanel(CTkFrame):
         self._show_results()
 
         # Load groups into treeview
-        for group in self._filtered_groups:
+        for group_idx, group in enumerate(self._filtered_groups):
             # Format size for display
             size_str = self._format_bytes(group.total_size)
             reclaimable_str = self._format_bytes(group.reclaimable)
@@ -663,6 +665,14 @@ class ResultsPanel(CTkFrame):
                     values=values,
                     tags=tuple(tags) if tags else ()
                 )
+
+            # Yield to the UI loop periodically for very large result sets.
+            # Without this, Tk can be marked "Not Responding" during bulk insert.
+            if group_idx % 15 == 0:
+                try:
+                    self.update_idletasks()
+                except Exception:
+                    pass
 
     def _format_row(self, path: Path, file_data, meta: dict) -> tuple:
         """Return treeview column values for the current scan mode."""
@@ -731,17 +741,15 @@ class ResultsPanel(CTkFrame):
 
     def _show_empty_state(self) -> None:
         """Show getting-started / empty state view."""
-        if self._treeview.winfo_ismapped():
-            self._treeview.pack_forget()
-        if not self._empty_view.winfo_ismapped():
-            self._empty_view.pack(fill="both", expand=True)
+        # Unconditionally toggle; mapped-state checks can be stale during fast
+        # scan state changes and cause both views to remain visible.
+        self._treeview.pack_forget()
+        self._empty_view.pack(fill="both", expand=True)
 
     def _show_results(self) -> None:
         """Show results treeview, hide empty state."""
-        if self._empty_view.winfo_ismapped():
-            self._empty_view.pack_forget()
-        if not self._treeview.winfo_ismapped():
-            self._treeview.pack(fill="both", expand=True)
+        self._empty_view.pack_forget()
+        self._treeview.pack(fill="both", expand=True)
 
     def _on_gs_add_folder(self) -> None:
         if self._on_request_add_folder:
