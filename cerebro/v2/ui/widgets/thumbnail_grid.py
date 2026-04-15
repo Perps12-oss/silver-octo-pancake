@@ -23,6 +23,8 @@ except ImportError:
     CTkCheckBox = tk.Checkbutton
     CTkScrollableFrame = tk.Frame
 
+HAS_CTK_IMAGE = bool(globals().get("ctk", None)) and hasattr(globals().get("ctk", None), "CTkImage")
+
 try:
     from PIL import Image, ImageOps, ImageTk
     HAS_PIL = True
@@ -372,9 +374,12 @@ class ThumbnailGrid(CTkFrame):
         if pil_image is None:
             card.set_placeholder("Preview N/A")
             return
-        tk_image = ImageTk.PhotoImage(pil_image)
-        self._thumb_cache_put(cache_key, tk_image)
-        card.set_thumbnail(tk_image)
+        if HAS_CTK_IMAGE:
+            image_obj = ctk.CTkImage(light_image=pil_image, dark_image=pil_image, size=pil_image.size)
+        else:
+            image_obj = ImageTk.PhotoImage(pil_image)
+        self._thumb_cache_put(cache_key, image_obj)
+        card.set_thumbnail(image_obj)
 
     def _thumb_cache_key(self, path: Path) -> Tuple[str, float, int]:
         try:

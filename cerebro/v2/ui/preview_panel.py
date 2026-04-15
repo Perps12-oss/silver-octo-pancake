@@ -131,9 +131,20 @@ class _SidePanel(CTkFrame):
         except Exception:
             pass
 
-    def load(self, file_data: Dict[str, Any]) -> None:
+    def _fd_get(self, file_data: Any, key: str, default: Any = None) -> Any:
+        if isinstance(file_data, dict):
+            return file_data.get(key, default)
+        value = getattr(file_data, key, default)
+        if value is not None:
+            return value
+        meta = getattr(file_data, "metadata", None)
+        if isinstance(meta, dict):
+            return meta.get(key, default)
+        return default
+
+    def load(self, file_data: Any) -> None:
         self._current_file = file_data
-        path_str = file_data.get("path", "")
+        path_str = str(self._fd_get(file_data, "path", "") or "")
         path = Path(path_str) if path_str else None
 
         is_image = (path and path.suffix.lower() in _IMAGE_EXTENSIONS
@@ -150,13 +161,13 @@ class _SidePanel(CTkFrame):
 
         # Compact metadata: "1280 × 720 px  ·  3.2 MB  ·  2024-05-01"
         parts = []
-        w, h = file_data.get("width"), file_data.get("height")
+        w, h = self._fd_get(file_data, "width"), self._fd_get(file_data, "height")
         if w and h:
             parts.append(f"{w} × {h} px")
-        size = file_data.get("size", 0)
+        size = self._fd_get(file_data, "size", 0)
         if size:
             parts.append(_format_bytes(size))
-        modified = file_data.get("modified", 0)
+        modified = self._fd_get(file_data, "modified", 0)
         if modified:
             parts.append(_format_date(modified))
         self._meta_lbl.configure(text="  ·  ".join(parts) if parts else "—")
@@ -201,8 +212,8 @@ class PreviewPanel(CTkFrame):
         super().__init__(master, **kwargs)
 
         self._collapsed: bool = True
-        self._file_a: Optional[Dict[str, Any]] = None
-        self._file_b: Optional[Dict[str, Any]] = None
+        self._file_a: Optional[Any] = None
+        self._file_b: Optional[Any] = None
         self._sync_enabled: bool = True
         self._layout_mode: str = "compact"
         self._metadata_table: Optional[MetadataTable] = None
@@ -398,7 +409,10 @@ class PreviewPanel(CTkFrame):
                 pass
             self._metadata_table.clear()
             return
-        path_str = target.get("path", "")
+        if isinstance(target, dict):
+            path_str = str(target.get("path", "") or "")
+        else:
+            path_str = str(getattr(target, "path", "") or "")
         path = Path(path_str) if path_str else None
         is_image = (path and path.suffix.lower() in _IMAGE_EXTENSIONS and path.exists())
         try:
@@ -444,7 +458,7 @@ class PreviewPanel(CTkFrame):
     def get_layout_mode(self) -> str:
         return self._layout_mode
 
-    def load_single(self, file_data: Optional[Dict[str, Any]]) -> None:
+    def load_single(self, file_data: Optional[Any]) -> None:
         """Load one file (clears side B). Pass None to clear."""
         self._file_a = file_data
         self._file_b = None
@@ -462,8 +476,8 @@ class PreviewPanel(CTkFrame):
 
     def load_comparison(
         self,
-        file_a: Optional[Dict[str, Any]],
-        file_b: Optional[Dict[str, Any]],
+        file_a: Optional[Any],
+        file_b: Optional[Any],
     ) -> None:
         """Load two files for side-by-side comparison."""
         self._file_a = file_a
@@ -485,7 +499,7 @@ class PreviewPanel(CTkFrame):
         self._update_layout()
         self._update_ashisoft_view()
 
-    def load_file_a(self, file_data: Optional[Dict[str, Any]]) -> None:
+    def load_file_a(self, file_data: Optional[Any]) -> None:
         self._file_a = file_data
         if file_data:
             self._side_a.load(file_data)
@@ -495,7 +509,7 @@ class PreviewPanel(CTkFrame):
         self._update_layout()
         self._update_ashisoft_view()
 
-    def load_file_b(self, file_data: Optional[Dict[str, Any]]) -> None:
+    def load_file_b(self, file_data: Optional[Any]) -> None:
         self._file_b = file_data
         if file_data:
             self._side_b.load(file_data)
