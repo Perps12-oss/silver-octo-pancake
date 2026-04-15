@@ -59,11 +59,18 @@ class PreviewCoordinator:
         self.update_preview_panel(checked_items)
 
     def update_preview_panel(self, checked_items: List[str]) -> None:
-        # Store selected file IDs for keep buttons.
-        self._window._selected_file_ids = checked_items[:2]
+        # Prefer checked items for preview; if none checked, show last focused row (grid/list).
+        focus_id = getattr(self._window, "_preview_focus_id", "") or ""
+        preview_ids: List[str] = []
+        if checked_items:
+            preview_ids = checked_items[:2]
+        elif focus_id:
+            preview_ids = [focus_id]
+
+        self._window._selected_file_ids = preview_ids[:2]
 
         files_data: list[Any] = []
-        for item_id in checked_items[:2]:
+        for item_id in preview_ids[:2]:
             file_data = self._window._get_file_data_by_id(item_id)
             if file_data:
                 files_data.append(file_data)

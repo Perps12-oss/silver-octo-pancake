@@ -51,11 +51,18 @@ class _Card(CTkFrame):
     THUMB_W = 96
     THUMB_H = 96
 
-    def __init__(self, master, item_id: str, file_obj: Any, on_check: Callable[[str, bool], None], on_click: Callable[[str], None]):
+    def __init__(
+        self,
+        master,
+        item_id: str,
+        file_obj: Any,
+        on_check: Callable[[str, bool], None],
+        on_focus: Callable[[str], None],
+    ):
         super().__init__(master, fg_color=theme_color("base.backgroundElevated"), corner_radius=Spacing.BORDER_RADIUS_SM)
         self._item_id = item_id
         self._on_check = on_check
-        self._on_click = on_click
+        self._on_focus = on_focus
         self._var = tk.BooleanVar(value=False)
         self._thumb_ref = None
         name = Path(str(getattr(file_obj, "path", ""))).name
@@ -64,10 +71,13 @@ class _Card(CTkFrame):
         self._check.pack(anchor="ne", padx=Spacing.XS, pady=(Spacing.XS, 0))
         self._thumb = CTkLabel(self, text="Loading...", width=self.THUMB_W, height=self.THUMB_H)
         self._thumb.pack(anchor="w", padx=Spacing.XS, pady=(0, Spacing.XS))
-        CTkLabel(self, text=(name[:20] + "..." if len(name) > 20 else name), font=Typography.FONT_XS).pack(anchor="w", padx=Spacing.XS)
-        CTkLabel(self, text=_fmt_bytes(size), font=Typography.FONT_XS, text_color=theme_color("base.foregroundMuted")).pack(anchor="w", padx=Spacing.XS, pady=(0, Spacing.XS))
-        for w in (self, self._thumb):
-            w.bind("<Button-1>", lambda _e: self._on_click(self._item_id))
+        self._name_lbl = CTkLabel(self, text=(name[:20] + "..." if len(name) > 20 else name), font=Typography.FONT_XS)
+        self._name_lbl.pack(anchor="w", padx=Spacing.XS)
+        self._size_lbl = CTkLabel(self, text=_fmt_bytes(size), font=Typography.FONT_XS, text_color=theme_color("base.foregroundMuted"))
+        self._size_lbl.pack(anchor="w", padx=Spacing.XS, pady=(0, Spacing.XS))
+        # Click card / thumb / labels = preview focus only; checkbox toggles mark-for-delete.
+        for w in (self, self._thumb, self._name_lbl, self._size_lbl):
+            w.bind("<Button-1>", lambda _e: self._on_focus(self._item_id))
 
     def _on_toggle(self) -> None:
         self._on_check(self._item_id, bool(self._var.get()))
@@ -105,6 +115,7 @@ class ThumbnailGrid(CTkFrame):
         self._groups: List[Any] = []
         self._cards: Dict[str, _Card] = {}
         self._on_selection_changed: Optional[Callable[[List[str]], None]] = None
+        self._on_focus_changed: Optional[Callable[[str], None]] = None
         self._on_request_add_folder: Optional[Callable[[], None]] = None
         self._on_request_start_search: Optional[Callable[[], None]] = None
         self._render_after_id: Optional[str] = None
@@ -198,6 +209,10 @@ class ThumbnailGrid(CTkFrame):
                 w.destroy()
             except tk.TclError as exc:
                 logger.debug("Failed to destroy old thumbnail widget: %s", exc)
+        try:
+            self._status.configure(text="No results — run a scan")
+        except (tk.TclError, AttributeError) as exc:
+            logger.debug("Thumbnail status reset skipped: %s", exc)
         self._empty = CTkFrame(self._scroll, fg_color="transparent")
         self._empty.pack(fill="both", expand=True)
         CTkLabel(self._empty, text="No duplicates to display", font=Typography.FONT_LG).pack(pady=(40, Spacing.SM))
@@ -259,7 +274,7 @@ class ThumbnailGrid(CTkFrame):
         for file_idx in range(start, end):
             f = files[file_idx]
             iid = f"{gid}_{file_idx}"
-            card = _Card(cards_row, iid, f, self._on_card_check, self._on_card_click)
+            card = _Card(cards_row, iid, f, self._on_card_check, self._on_card_focus)
             card.pack(side="left", padx=Spacing.XS, pady=Spacing.XS)
             self._cards[iid] = card
             self._request_thumbnail(iid, f)
@@ -269,11 +284,16 @@ class ThumbnailGrid(CTkFrame):
         if self._on_selection_changed:
             self._on_selection_changed(self.get_checked())
 
-    def _on_card_click(self, item_id: str) -> None:
-        card = self._cards.get(item_id)
-        if card is None:
-            return
-        self.set_check(item_id, not card.is_checked())
+    def _on_card_focus(self, item_id: str) -> None:
+        if self._on_focus_changed:
+            self._on_focus_changed(item_id)
+
+    def apply_check_state(self, checked_ids: set, *, notify: bool = True) -> None:
+        """Sync checkbox state from a set of item ids (e.g. treeview selection)."""
+        for iid, card in self._cards.items():
+            card.set_checked(iid in checked_ids)
+        if notify and self._on_selection_changed:
+            self._on_selection_changed(self.get_checked())
 
     def get_checked(self) -> List[str]:
         return [iid for iid, card in self._cards.items() if card.is_checked()]
@@ -287,6 +307,9 @@ class ThumbnailGrid(CTkFrame):
 
     def on_selection_changed(self, callback: Callable[[List[str]], None]) -> None:
         self._on_selection_changed = callback
+
+    def on_focus_changed(self, callback: Callable[[str], None]) -> None:
+        self._on_focus_changed = callback
 
     def on_request_add_folder(self, callback: Callable[[], None]) -> None:
         self._on_request_add_folder = callback

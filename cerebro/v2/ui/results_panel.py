@@ -522,6 +522,12 @@ class ResultsPanel(CTkFrame):
         self._on_request_add_folder: Optional[Callable[[], None]] = None
         self._on_request_start_search: Optional[Callable[[], None]] = None
 
+        # Thumbnail grid ↔ treeview share one logical selection; grid needs tree sync for rules.
+        self._thumbnail_grid: Any = None
+        self._results_view_mode: str = "list"
+        self._syncing_checks: bool = False
+        self._on_file_row_focus: Optional[Callable[[str], None]] = None
+
     def _fd_path(self, fd) -> str:
         if isinstance(fd, dict):
             return str(fd.get("path", ""))
@@ -704,15 +710,22 @@ class ResultsPanel(CTkFrame):
 
     def _on_check_changed(self, item_id: str, checked: bool) -> None:
         """Handle checkbox state change."""
+        if self._syncing_checks:
+            return
         if checked:
             self._selected_count += 1
         else:
             self._selected_count = max(0, self._selected_count - 1)
 
+        if (
+            self._results_view_mode == "grid"
+            and self._thumbnail_grid is not None
+            and getattr(self._thumbnail_grid, "_cards", None)
+        ):
+            self._sync_thumbnail_checks_from_tree()
         # Notify callback
         if self._on_selection_changed:
-            checked_items = self._treeview.get_checked()
-            self._on_selection_changed(checked_items)
+            self._on_selection_changed(self._get_checked_item_ids())
 
     def _get_file_data_for_item(self, item_id: str) -> Optional[DuplicateFile]:
         """Return the DuplicateFile for a treeview item_id, or None if it's a group row."""
@@ -738,6 +751,8 @@ class ResultsPanel(CTkFrame):
         file_data = self._get_file_data_for_item(item_id)
         if file_data and self._on_file_selected:
             self._on_file_selected(file_data)
+        if file_data and self._on_file_row_focus:
+            self._on_file_row_focus(item_id)
 
     def _on_double_click(self, event) -> None:
         """Handle double-click — fire file-double-clicked callback."""
@@ -1275,6 +1290,50 @@ class ResultsPanel(CTkFrame):
                     self._treeview.set_check(item_id, False)
                     return
 
+    def attach_thumbnail_grid(self, grid: Any) -> None:
+        """Wire the thumbnail grid so selection rules and delete apply in grid view."""
+        self._thumbnail_grid = grid
+
+    def set_results_view_mode(self, mode: str) -> None:
+        """Whether the user is viewing list (tree) or grid thumbnails."""
+        self._results_view_mode = mode if mode in ("list", "grid") else "list"
+
+    def on_file_row_focus(self, callback: Callable[[str], None]) -> None:
+        """Callback when a list row is activated for preview (separate from checkbox)."""
+        self._on_file_row_focus = callback
+
+    def _get_checked_item_ids(self) -> List[str]:
+        if self._results_view_mode == "grid" and self._thumbnail_grid is not None:
+            return self._thumbnail_grid.get_checked()
+        return self._treeview.get_checked()
+
+    def _sync_thumbnail_checks_from_tree(self) -> None:
+        """Mirror treeview checks onto thumbnail cards when the grid is built."""
+        if self._thumbnail_grid is None:
+            return
+        cards = getattr(self._thumbnail_grid, "_cards", None)
+        if not cards:
+            return
+        self._thumbnail_grid.apply_check_state(
+            set(self._treeview.get_checked()), notify=False
+        )
+
+    def sync_tree_checks_from_grid_state(self, checked: List[str]) -> None:
+        """After the user toggles grid checkboxes, update the hidden treeview."""
+        self._syncing_checks = True
+        try:
+            checked_set = set(checked)
+            for g in self._filtered_groups:
+                for i in range(len(g.files)):
+                    iid = f"{g.group_id}_{i}"
+                    want = iid in checked_set
+                    cur = self._treeview._item_states.get(iid, False)
+                    if cur != want:
+                        self._treeview.set_check(iid, want)
+            self._selected_count = len(self._treeview.get_checked())
+        finally:
+            self._syncing_checks = False
+
     def get_selected_files(self) -> List[Dict[str, Any]]:
         """
         Get list of selected (checked) files.
@@ -1282,7 +1341,7 @@ class ResultsPanel(CTkFrame):
         Returns:
             List of file data dictionaries for checked items.
         """
-        checked_ids = self._treeview.get_checked()
+        checked_ids = self._get_checked_item_ids()
         files = []
 
         for item_id in checked_ids:
@@ -1450,10 +1509,10 @@ class ResultsPanel(CTkFrame):
             self._treeview.invert_checks()
             self._selected_count = self._total_items - self._selected_count
 
+        self._sync_thumbnail_checks_from_tree()
         # Notify callback
         if self._on_selection_changed:
-            checked_items = self._treeview.get_checked()
-            self._on_selection_changed(checked_items)
+            self._on_selection_changed(self._get_checked_item_ids())
 
     def expand_all_groups(self) -> None:
         """Expand all groups in treeview."""

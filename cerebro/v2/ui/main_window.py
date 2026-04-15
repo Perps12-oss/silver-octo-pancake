@@ -98,6 +98,7 @@ class MainWindow(CTk, CTkMessageInterface):
         self._eta_smoothed: float = 0.0
         self._polling_enabled: bool = False
         self._selected_file_ids: List[str] = []  # For preview panel
+        self._preview_focus_id: str = ""  # Row/card focused for metadata when nothing checked
 
         # Scan results (core.DuplicateGroup format)
         self._scan_results: List[DuplicateGroup] = []
@@ -274,7 +275,11 @@ class MainWindow(CTk, CTkMessageInterface):
         self._results_panel.on_request_add_folder(self._on_add_path)
         self._results_panel.on_request_start_search(self._on_start_search)
         self._results_panel.on_request_auto_mark(self._on_auto_mark_default)
-        self._thumbnail_grid.on_selection_changed(self._on_selection_changed)
+        self._results_panel.attach_thumbnail_grid(self._thumbnail_grid)
+        self._results_panel.set_results_view_mode("list")
+        self._results_panel.on_file_row_focus(self._on_tree_preview_focus)
+        self._thumbnail_grid.on_selection_changed(self._on_thumbnail_grid_selection_changed)
+        self._thumbnail_grid.on_focus_changed(self._on_thumbnail_grid_focus)
         self._thumbnail_grid.on_request_add_folder(self._on_add_path)
         self._thumbnail_grid.on_request_start_search(self._on_start_search)
 
@@ -608,6 +613,10 @@ class MainWindow(CTk, CTkMessageInterface):
             return
         self._view_mode = mode
         try:
+            self._results_panel.set_results_view_mode(mode)
+        except (tk.TclError, AttributeError) as exc:
+            logger.debug("set_results_view_mode skipped: %s", exc)
+        try:
             self._results_panel.pack_forget()
             self._thumbnail_grid.pack_forget()
         except (tk.TclError, AttributeError) as exc:
@@ -632,6 +641,9 @@ class MainWindow(CTk, CTkMessageInterface):
             return
         try:
             self._thumbnail_grid.load_results(self._scan_results)
+            self._thumbnail_grid.apply_check_state(
+                set(self._results_panel._treeview.get_checked()), notify=False
+            )
             self._thumbnail_grid_dirty = False
         except (RuntimeError, tk.TclError, AttributeError) as exc:
             logger.warning("Thumbnail grid hydration failed: %s", exc)
@@ -650,7 +662,8 @@ class MainWindow(CTk, CTkMessageInterface):
             # Check all other files in the same group
             self._mark_others_in_group_checked(item_id, True)
             # Update selection count
-            self._on_selection_changed(self._results_panel._treeview.get_checked())
+            self._results_panel._sync_thumbnail_checks_from_tree()
+            self._on_selection_changed(self._results_panel._get_checked_item_ids())
 
     def _on_keep_b(self) -> None:
         """Handle keep file B button in preview."""
@@ -665,8 +678,8 @@ class MainWindow(CTk, CTkMessageInterface):
             self._results_panel._treeview.set_check(item_id, False)
             # Check all other files in the same group
             self._mark_others_in_group_checked(item_id, True)
-            # Update selection count
-            self._on_selection_changed(self._results_panel._treeview.get_checked())
+            self._results_panel._sync_thumbnail_checks_from_tree()
+            self._on_selection_changed(self._results_panel._get_checked_item_ids())
 
     def _get_file_data_by_id(self, item_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -732,6 +745,11 @@ class MainWindow(CTk, CTkMessageInterface):
             except (tk.TclError, RuntimeError, AttributeError) as exc:
                 logger.debug("Failed clearing thumbnail grid on mode switch: %s", exc)
         self._thumbnail_grid_dirty = True
+        self._preview_focus_id = ""
+        try:
+            self._preview_panel.clear()
+        except (tk.TclError, AttributeError) as exc:
+            logger.debug("Preview clear on mode change skipped: %s", exc)
 
         # Update left panel scan options for this mode
         if hasattr(self, '_folder_panel') and self._folder_panel:
@@ -809,14 +827,17 @@ class MainWindow(CTk, CTkMessageInterface):
     def _on_select_all(self) -> None:
         """Handle select all action."""
         self._results_panel._treeview.check_all()
+        self._results_panel._sync_thumbnail_checks_from_tree()
 
     def _on_deselect_all(self) -> None:
         """Handle deselect all action."""
         self._results_panel._treeview.uncheck_all()
+        self._results_panel._sync_thumbnail_checks_from_tree()
 
     def _on_invert_selection(self) -> None:
         """Handle invert selection action."""
         self._results_panel._treeview.invert_checks()
+        self._results_panel._sync_thumbnail_checks_from_tree()
 
     def _on_delete_selected(self) -> None:
         """Handle delete selected action."""
@@ -952,6 +973,25 @@ class MainWindow(CTk, CTkMessageInterface):
 
     def _on_selection_changed(self, checked_items: List[str]) -> None:
         """Handle selection changes from results panel."""
+        self._preview_coordinator.on_selection_changed(checked_items)
+
+    def _on_tree_preview_focus(self, item_id: str) -> None:
+        """List view: a file row was activated for preview/metadata."""
+        self._preview_focus_id = item_id
+        self._preview_coordinator.update_preview_panel(
+            self._results_panel._get_checked_item_ids()
+        )
+
+    def _on_thumbnail_grid_focus(self, item_id: str) -> None:
+        """Grid view: user clicked a card for preview (checkbox is separate)."""
+        self._preview_focus_id = item_id
+        self._preview_coordinator.update_preview_panel(
+            self._results_panel._get_checked_item_ids()
+        )
+
+    def _on_thumbnail_grid_selection_changed(self, checked_items: List[str]) -> None:
+        """Grid checkboxes changed — mirror onto treeview, then toolbar + preview."""
+        self._results_panel.sync_tree_checks_from_grid_state(checked_items)
         self._preview_coordinator.on_selection_changed(checked_items)
 
     def _update_preview_panel(self, checked_items: List[str]) -> None:

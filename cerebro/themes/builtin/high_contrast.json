@@ -84,6 +84,9 @@
     "feedback.danger": "#F85149",
     "feedback.dangerBackground": "#2D0709",
     "feedback.info": "#58A6FF",
-    "feedback.infoBackground": "#0D1D30"
+    "feedback.infoBackground": "#0D1D30",
+    "tabs.inactiveBackground": "#000000",
+    "tabs.inactiveForeground": "#E0E0E0",
+    "tabs.inactiveBackgroundHover": "#1A1A1A"
   }
 }
