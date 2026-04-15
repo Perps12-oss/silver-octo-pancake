@@ -37,7 +37,8 @@ jobs:
 
       - name: Pytest
         run: |
-          python -m pytest -q
+          sudo apt-get update && sudo apt-get install -y xvfb
+          xvfb-run -a python -m pytest -q
 
       - name: Runtime smoke
         run: |

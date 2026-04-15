@@ -36,6 +36,7 @@ class ScanProgress:
     elapsed_seconds: float = 0.0
     current_file: str = ""  # path of file currently being processed
     eta_seconds: Optional[float] = None  # estimated time to completion
+    stage: str = ""  # human-readable phase, e.g. "discovering", "hashing_partial"
 
 
 @dataclass

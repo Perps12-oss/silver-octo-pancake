@@ -273,6 +273,7 @@ class MainWindow(CTk, CTkMessageInterface):
         self._results_panel.on_selection_changed(self._on_selection_changed)
         self._results_panel.on_request_add_folder(self._on_add_path)
         self._results_panel.on_request_start_search(self._on_start_search)
+        self._results_panel.on_request_auto_mark(self._on_auto_mark_default)
         self._thumbnail_grid.on_selection_changed(self._on_selection_changed)
         self._thumbnail_grid.on_request_add_folder(self._on_add_path)
         self._thumbnail_grid.on_request_start_search(self._on_start_search)
@@ -455,6 +456,19 @@ class MainWindow(CTk, CTkMessageInterface):
     def _handle_progress_on_main(self, progress: ScanProgress) -> None:
         """Process a progress update on the main thread."""
         self._update_status_bar(progress)
+
+        if progress.state == ScanState.SCANNING:
+            elapsed = (
+                time.time() - self._scan_start_time
+                if self._scan_start_time > 0
+                else 0.0
+            )
+            self._results_panel.update_scan_progress(
+                stage=progress.stage,
+                files_scanned=progress.files_scanned,
+                files_total=progress.files_total,
+                elapsed_seconds=elapsed,
+            )
 
         if progress.state in (ScanState.COMPLETED, ScanState.CANCELLED, ScanState.ERROR):
             self._on_scan_finished(progress.state)
@@ -731,6 +745,11 @@ class MainWindow(CTk, CTkMessageInterface):
         else:
             if hasattr(self._results_panel, "_ffmpeg_banner"):
                 self._results_panel.show_ffmpeg_warning(False)
+
+    def _on_auto_mark_default(self) -> None:
+        """Apply saved default auto-mark rule (banner / settings)."""
+        rule = self._app_settings.auto_mark_selection_rule()
+        self._on_auto_mark(rule)
 
     def _on_auto_mark(self, rule: str) -> None:
         """Handle Auto Mark dropdown selection from toolbar."""

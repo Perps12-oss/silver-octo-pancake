@@ -93,6 +93,8 @@ class ScanController:
             self._window.show_info("No Folders", "Please add at least one folder to scan.")
             return
 
+        self._window._results_panel.hide_scan_complete()
+
         self._window._scan_results.clear()
         self._window._results_panel.clear()
         self._window._status_bar.reset()
@@ -122,6 +124,8 @@ class ScanController:
         self._window._orchestrator.set_mode(scan_mode)
 
         try:
+            self._window._results_panel.show_scanning_progress()
+            self._window._results_panel.on_request_stop_search(self.stop_search)
             self._window._orchestrator.start_scan(
                 folders=folders,
                 protected=protected_folders,
@@ -138,6 +142,8 @@ class ScanController:
         self._window._orchestrator.cancel()
 
     def finish_scan(self, final_state: ScanState = ScanState.COMPLETED) -> None:
+        self._window._results_panel.hide_scan_progress()
+
         self._window._stop_progress_polling()
         self._window._status_bar.stop_polling()
 
@@ -154,15 +160,23 @@ class ScanController:
         if self._window._scan_results:
             self._window._load_results_to_panel()
 
-        if final_state == ScanState.COMPLETED:
-            total_files = sum(len(g.files) for g in self._window._scan_results)
-            reclaimable = sum(g.reclaimable for g in self._window._scan_results)
-            elapsed = (
-                time.time() - self._window._scan_start_time
-                if self._window._scan_start_time > 0
-                else 0.0
-            )
+        total_files = sum(len(g.files) for g in self._window._scan_results)
+        reclaimable = sum(g.reclaimable for g in self._window._scan_results)
+        elapsed = (
+            time.time() - self._window._scan_start_time
+            if self._window._scan_start_time > 0
+            else 0.0
+        )
+        duplicates_found = total_files - len(self._window._scan_results)
+        self._window._results_panel.show_scan_complete(
+            final_state=final_state,
+            groups_found=len(self._window._scan_results),
+            duplicates_found=duplicates_found,
+            bytes_reclaimable=reclaimable,
+            elapsed_seconds=elapsed,
+        )
 
+        if final_state == ScanState.COMPLETED:
             self._history.record_completed_scan(
                 mode=self._window._current_scan_mode,
                 groups_found=len(self._window._scan_results),
@@ -174,7 +188,7 @@ class ScanController:
             self._window._status_bar.update_metrics(
                 StatusBarMetrics(
                     files_scanned=total_files,
-                    duplicates_found=total_files - len(self._window._scan_results),
+                    duplicates_found=duplicates_found,
                     groups_found=len(self._window._scan_results),
                     bytes_reclaimable=reclaimable,
                     elapsed_seconds=elapsed,

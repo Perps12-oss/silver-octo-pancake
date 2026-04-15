@@ -41,7 +41,8 @@ _STAGE_MAP: Dict[str, ScanState] = {
     "grouping_by_size": ScanState.SCANNING,
     "hashing_partial": ScanState.SCANNING,
     "hashing_full": ScanState.SCANNING,
-    "complete": ScanState.COMPLETED,
+    # Keep SCANNING until _do_scan emits the final ScanProgress(COMPLETED).
+    "complete": ScanState.SCANNING,
 }
 
 
@@ -211,6 +212,7 @@ class TurboFileEngine(BaseEngine):
             duplicates_found=sum(len(g.files) for g in self._results),
             groups_found=len(self._results),
             bytes_reclaimable=sum(g.reclaimable for g in self._results),
+            stage="complete",
         )
         self._emit_progress()
 
@@ -228,6 +230,7 @@ class TurboFileEngine(BaseEngine):
             state=state,
             files_scanned=max(scanned, self._progress.files_scanned),
             files_total=total if total > 0 else self._progress.files_total,
+            stage=stage,
         )
         self._emit_progress()
 
