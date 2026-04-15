@@ -1,6 +1,6 @@
 # cerebro/core/theme_schema.py
 """
-Theme Schema — 80 semantic color slot definitions with fallback chains.
+Theme Schema — semantic color slot definitions with fallback chains.
 
 Every themeable UI element has a semantic name (e.g. ``toolbar.background``).
 A theme defines colors for these slots. If a slot is omitted, the engine
@@ -31,7 +31,7 @@ class ColorSlot:
 
 
 # =============================================================================
-# Slot Registry — 80 slots across 12 groups
+# Slot Registry — semantic slots across 12 groups (see total_slots())
 # =============================================================================
 
 SLOT_REGISTRY: Dict[str, ColorSlot] = {}
@@ -82,7 +82,7 @@ _s("toolbar.buttonHover",      "toolbar", "Button hover background",
 _s("toolbar.separator",        "toolbar", "Vertical separator between button groups",
    fallback="base.border", derive="alpha:50")
 
-# ---- Tabs (6 slots) ----
+# ---- Tabs (10 slots) ----
 
 _s("tabs.background",          "tabs", "Tab strip background",
    fallback="base.background")
@@ -96,6 +96,14 @@ _s("tabs.hoverBackground",     "tabs", "Tab hover background",
    fallback="base.backgroundTertiary")
 _s("tabs.border",              "tabs", "Tab strip bottom border",
    fallback="base.border")
+_s("tabs.inactiveBackground", "tabs", "Inactive tab cell background",
+   fallback="tabs.background")
+_s("tabs.inactiveForeground", "tabs", "Inactive tab label",
+   fallback="tabs.foreground")
+_s("tabs.inactiveBackgroundHover", "tabs", "Inactive tab hover",
+   fallback="tabs.hoverBackground")
+_s("tabs.activeBorder",       "tabs", "Active tab bottom accent line",
+   fallback="base.accent")
 
 # ---- Panel — Left sidebar (6 slots) ----
 
