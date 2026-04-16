@@ -222,7 +222,6 @@ class MainWindow(CTk, CTkMessageInterface):
         self._build_toolbar()
         self._build_mode_tabs()
         self._build_horizontal_paned()
-        self._build_preview_panel()
         self._build_status_bar()
 
         # Post-build setup
@@ -297,7 +296,14 @@ class MainWindow(CTk, CTkMessageInterface):
             fg_color=theme_color("panel.background")
         )
 
-        # Add frames to paned window
+        # Right panel frame for the preview (third pane)
+        self._right_panel_frame = CTkFrame(
+            self._horizontal_paned,
+            fg_color=theme_color("panel.background"),
+            width=320,
+        )
+
+        # Add all three panes
         try:
             self._horizontal_paned.add(
                 self._left_panel_frame,
@@ -308,10 +314,16 @@ class MainWindow(CTk, CTkMessageInterface):
                 self._center_panel_frame,
                 stretch="always"
             )
+            self._horizontal_paned.add(
+                self._right_panel_frame,
+                minsize=200,
+                width=320,
+            )
         except (AttributeError, TypeError):
             # Fallback for standard PanedWindow
             self._horizontal_paned.add(self._left_panel_frame)
             self._horizontal_paned.add(self._center_panel_frame)
+            self._horizontal_paned.add(self._right_panel_frame)
 
         # Create and pack actual panels
         self._folder_panel = FolderPanel(self._left_panel_frame)
@@ -321,6 +333,13 @@ class MainWindow(CTk, CTkMessageInterface):
         self._results_panel.pack(fill="both", expand=True)
         self._thumbnail_grid = ThumbnailGrid(self._center_panel_frame)
         self._thumbnail_grid.set_mode(self._current_scan_mode)
+
+        # Preview panel lives in the right pane — always visible, full height
+        self._preview_panel = PreviewPanel(self._right_panel_frame)
+        self._preview_panel.pack(fill="both", expand=True)
+        self._preview_panel.set_layout_mode("ashisoft")
+        self._preview_panel.on_keep_a(self._on_keep_a)
+        self._preview_panel.on_keep_b(self._on_keep_b)
 
         # Wire folder panel callbacks
         self._folder_panel.on_folders_changed(self._on_folders_changed)
@@ -340,23 +359,6 @@ class MainWindow(CTk, CTkMessageInterface):
         self._thumbnail_grid.on_focus_changed(self._on_thumbnail_grid_focus)
         self._thumbnail_grid.on_request_add_folder(self._on_add_path)
         self._thumbnail_grid.on_request_start_search(self._on_start_search)
-
-    def _build_preview_panel(self) -> None:
-        """Build and install collapsible preview panel."""
-        self._preview_frame = CTkFrame(
-            self._content_container,
-            height=Dimensions.PREVIEW_PANEL_DEFAULT_HEIGHT,
-            fg_color=theme_color("panel.background")
-        )
-        self._preview_frame.pack(fill="x", padx=Spacing.MD, pady=Spacing.SM)
-
-        # Create and pack actual preview panel
-        self._preview_panel = PreviewPanel(self._preview_frame)
-        self._preview_panel.pack(fill="both", expand=True)
-
-        # Wire preview panel callbacks
-        self._preview_panel.on_keep_a(self._on_keep_a)
-        self._preview_panel.on_keep_b(self._on_keep_b)
 
     def _build_status_bar(self) -> None:
         """Build and install status bar."""
@@ -455,7 +457,6 @@ class MainWindow(CTk, CTkMessageInterface):
 
         try:
             self._preview_panel.clear()
-            self._preview_panel.set_layout_mode("compact")
         except (AttributeError, tk.TclError) as exc:
             logger.debug("Preview reset on back-to-start skipped: %s", exc)
 
@@ -711,16 +712,8 @@ class MainWindow(CTk, CTkMessageInterface):
         if mode == "grid":
             self._thumbnail_grid.pack(fill="both", expand=True)
             self.after(0, self._hydrate_thumbnail_grid_if_needed)
-            try:
-                self._preview_panel.set_layout_mode("ashisoft")
-            except (tk.TclError, AttributeError) as exc:
-                logger.debug("Failed to switch preview to ashisoft layout: %s", exc)
         else:
             self._results_panel.pack(fill="both", expand=True)
-            try:
-                self._preview_panel.set_layout_mode("compact")
-            except (tk.TclError, AttributeError) as exc:
-                logger.debug("Failed to switch preview to compact layout: %s", exc)
         self._apply_master_detail_proportions(force=True)
 
     def _hydrate_thumbnail_grid_if_needed(self) -> None:
@@ -1134,17 +1127,19 @@ class MainWindow(CTk, CTkMessageInterface):
             self._mode_tabs.set_mode(modes[mode_num - 1])
 
     def _toggle_preview_panel(self) -> None:
-        """Toggle preview panel visibility."""
-        if hasattr(self, '_preview_panel') and self._preview_panel:
-            self._preview_panel.set_collapsed(not self._preview_panel.is_collapsed())
-            self._preview_collapsed = self._preview_panel.is_collapsed()
-        else:
-            # Fallback to frame-level toggle if panel not available
+        """Toggle right-pane preview visibility by adding/forgetting from PanedWindow."""
+        try:
             if self._preview_collapsed:
-                self._preview_frame.pack(fill="x", padx=Spacing.MD, pady=Spacing.SM)
+                self._horizontal_paned.add(
+                    self._right_panel_frame, minsize=200, width=320
+                )
+                self._preview_collapsed = False
             else:
-                self._preview_frame.pack_forget()
-            self._preview_collapsed = not self._preview_collapsed
+                self._horizontal_paned.forget(self._right_panel_frame)
+                self._preview_collapsed = True
+            self.after(0, lambda: self._apply_master_detail_proportions(force=True))
+        except (tk.TclError, AttributeError) as exc:
+            logger.debug("Preview panel toggle skipped: %s", exc)
 
     def _on_refresh(self) -> None:
         """Handle F5 refresh — re-run the last scan if folders are configured."""
@@ -1206,13 +1201,24 @@ class MainWindow(CTk, CTkMessageInterface):
         return max(Dimensions.LEFT_PANEL_MIN_WIDTH, min(ratio_target, max_left))
 
     def _apply_master_detail_proportions(self, *, force: bool = False) -> None:
-        """Maintain an Ashisoft-like master/detail split."""
+        """Maintain an Ashisoft-like master/detail split (left | center | right)."""
         try:
+            total_w = int(self._horizontal_paned.winfo_width() or 0)
+
+            # Sash 0: left | center
             target = self._target_left_panel_width()
             current = int(self._horizontal_paned.sash_coord(0)[0])
             if force or abs(current - target) >= 8:
                 self._horizontal_paned.sash_place(0, target, 0)
-        except (tk.TclError, AttributeError, RuntimeError, ValueError) as exc:
+
+            # Sash 1: center | right preview (only when right pane is visible)
+            if total_w > 0 and not self._preview_collapsed:
+                preview_w = max(200, min(380, int(total_w * 0.30)))
+                target_right = max(target + 300, total_w - preview_w)
+                cur1 = int(self._horizontal_paned.sash_coord(1)[0])
+                if force or abs(cur1 - target_right) >= 8:
+                    self._horizontal_paned.sash_place(1, target_right, 0)
+        except (tk.TclError, AttributeError, RuntimeError, ValueError, IndexError) as exc:
             logger.debug("Master/detail split update skipped: %s", exc)
 
     def _on_space_toggle(self, event) -> None:
@@ -1309,7 +1315,7 @@ class MainWindow(CTk, CTkMessageInterface):
             self._main_frame.configure(fg_color=theme_color("base.background"))
             self._left_panel_frame.configure(fg_color=theme_color("panel.background"))
             self._center_panel_frame.configure(fg_color=theme_color("panel.background"))
-            self._preview_frame.configure(fg_color=theme_color("panel.background"))
+            self._right_panel_frame.configure(fg_color=theme_color("panel.background"))
         except (tk.TclError, AttributeError):
             pass
 
@@ -1366,7 +1372,7 @@ class MainWindow(CTk, CTkMessageInterface):
 
     def get_preview_frame(self) -> CTkFrame:
         """Get preview frame (for preview panel)."""
-        return self._preview_frame
+        return self._right_panel_frame
 
 
 def run_app() -> None:

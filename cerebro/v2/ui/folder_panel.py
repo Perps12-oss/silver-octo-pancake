@@ -272,17 +272,17 @@ class ScanOptionsPanel(CTkScrollableFrame):
         self._option_widgets[key] = cb
 
     def _build_files_options(self) -> None:
-        self._lbl("Hash Algorithm")
-        self._menu("hash_algo", ["SHA256", "Blake3", "MD5"], "SHA256")
-        self._lbl("Min Size (MB)")
+        self._lbl("Comparison Method")
+        self._menu("hash_algo", ["SHA256 (Recommended)", "Blake3 (Fastest)", "MD5 (Quick)"], "SHA256 (Recommended)")
+        self._lbl("Ignore files smaller than (MB)")
         self._slider("min_size", 0, 1024, 0)
-        self._lbl("Max Size (MB)  (0 = no limit)")
+        self._lbl("Ignore files larger than (MB, 0 = no limit)")
         self._slider("max_size", 0, 10240, 0)
 
     def _build_photos_options(self) -> None:
-        self._lbl("pHash Threshold (bits)")
+        self._lbl("Similarity sensitivity — perceptual (lower = stricter)")
         self._slider("phash_threshold", 0, 64, 8)
-        self._lbl("dHash Threshold (bits)")
+        self._lbl("Similarity sensitivity — detail (lower = stricter)")
         self._slider("dhash_threshold", 0, 64, 10)
         self._lbl("Include Formats")
         self._check("format_jpg", "JPG / JPEG", True)
@@ -292,9 +292,9 @@ class ScanOptionsPanel(CTkScrollableFrame):
         self._check("format_raw", "RAW (CR2, NEF, DNG…)", False)
 
     def _build_videos_options(self) -> None:
-        self._lbl("Duration Tolerance (seconds)")
+        self._lbl("Allow duration difference of (seconds)")
         self._slider("duration_tolerance", 0, 30, 3)
-        self._lbl("Keyframes to Extract")
+        self._lbl("Scan depth")
         self._menu("keyframe_count", ["3 (Fast)", "5 (Thorough)"], "3 (Fast)")
 
     def _build_music_options(self) -> None:
@@ -311,9 +311,9 @@ class ScanOptionsPanel(CTkScrollableFrame):
         self._slider("min_depth", 0, 10, 0)
 
     def _build_large_files_options(self) -> None:
-        self._lbl("Top N Files")
+        self._lbl("Show top N largest files")
         self._slider("top_n", 10, 500, 100)
-        self._lbl("Minimum Size (MB)")
+        self._lbl("Show files larger than (MB)")
         self._slider("min_size_mb", 0, 1024, 100)
         self._check("group_by_type", "Group by File Type", True)
 
@@ -327,6 +327,13 @@ class ScanOptionsPanel(CTkScrollableFrame):
         if isinstance(widget, CTkSlider):
             widget.set(float(value))
 
+    # Friendly-name → internal-value mapping for the Comparison Method menu.
+    _HASH_DISPLAY_MAP = {
+        "SHA256 (Recommended)": "SHA256",
+        "Blake3 (Fastest)":     "Blake3",
+        "MD5 (Quick)":          "MD5",
+    }
+
     def get_options(self) -> Dict:
         options: Dict[str, object] = {"mode": self._current_mode}
         for key, widget in self._option_widgets.items():
@@ -339,7 +346,9 @@ class ScanOptionsPanel(CTkScrollableFrame):
                     options[key] = False
             elif isinstance(widget, CTkOptionMenu):
                 try:
-                    options[key] = widget.get()
+                    raw = widget.get()
+                    # Strip friendly suffixes so engines receive the bare algorithm name.
+                    options[key] = self._HASH_DISPLAY_MAP.get(raw, raw)
                 except (OSError, ValueError, RuntimeError, AttributeError, TypeError, KeyError, ImportError):
                     options[key] = ""
         return options
