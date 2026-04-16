@@ -57,6 +57,59 @@ from cerebro.utils.formatting import format_bytes
 logger = get_logger(__name__)  # wraps logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Delete-flow helpers (module-level — no self needed)
+# ---------------------------------------------------------------------------
+
+def _delete_media_label(mode: str) -> str:
+    """Return the plural media noun for the current scan mode."""
+    from cerebro.v2.ui.mode_tabs import ScanMode
+    return {
+        ScanMode.PHOTOS: "photos",
+        ScanMode.VIDEOS: "videos",
+        ScanMode.MUSIC: "music tracks",
+        ScanMode.EMPTY_FOLDERS: "empty folders",
+        ScanMode.LARGE_FILES: "files",
+    }.get(mode, "files")
+
+
+def _delete_breakdown(files: list, mode: str) -> str:
+    """Return e.g. '21 photos' or '12 images · 5 videos · 4 other files'."""
+    from cerebro.v2.ui.mode_tabs import ScanMode
+    n = len(files)
+
+    if mode == ScanMode.PHOTOS:
+        return f"{n} photo{'s' if n != 1 else ''}"
+    if mode == ScanMode.VIDEOS:
+        return f"{n} video{'s' if n != 1 else ''}"
+    if mode == ScanMode.MUSIC:
+        return f"{n} music track{'s' if n != 1 else ''}"
+    if mode == ScanMode.EMPTY_FOLDERS:
+        return f"{n} empty folder{'s' if n != 1 else ''}"
+
+    # FILES / LARGE_FILES — group by category
+    IMG = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".heic",
+           ".tiff", ".tif", ".cr2", ".cr3", ".nef", ".arw", ".dng"}
+    VID = {".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm",
+           ".m4v", ".mpg", ".mpeg", ".3gp"}
+    AUD = {".mp3", ".flac", ".ogg", ".wav", ".aac", ".m4a", ".wma",
+           ".opus", ".aiff", ".ape"}
+    cats: dict = {"images": 0, "videos": 0, "audio files": 0, "other files": 0}
+    for f in files:
+        p = str(f.get("path", "") if isinstance(f, dict) else getattr(f, "path", ""))
+        ext = Path(p).suffix.lower()
+        if ext in IMG:
+            cats["images"] += 1
+        elif ext in VID:
+            cats["videos"] += 1
+        elif ext in AUD:
+            cats["audio files"] += 1
+        else:
+            cats["other files"] += 1
+    parts = [f"{v} {k}" for k, v in cats.items() if v]
+    return " · ".join(parts) or f"{n} files"
+
+
 class MainWindow(CTk, CTkMessageInterface):
     """
     Main application window with complete single-window layout.
@@ -883,7 +936,7 @@ class MainWindow(CTk, CTkMessageInterface):
         self._results_panel._sync_thumbnail_checks_from_tree()
 
     def _on_delete_selected(self) -> None:
-        """Handle delete selected action."""
+        """Handle delete selected — 4-step modal confirmation + celebration flow."""
         def _fd_path(fd: Any) -> str:
             if isinstance(fd, dict):
                 return str(fd.get("path", ""))
@@ -894,118 +947,126 @@ class MainWindow(CTk, CTkMessageInterface):
                 return int(fd.get("size", 0))
             return int(getattr(fd, "size", 0))
 
-        selected_files = self._results_panel.get_selected_files()
-        if not selected_files:
+        selected = self._results_panel.get_selected_files()
+        if not selected:
+            self.show_info("Delete Selected", "No files selected for deletion.")
+            return
+
+        count = len(selected)
+        mode = self._current_scan_mode
+        noun = _delete_media_label(mode)
+
+        # ── Step 1: Are you sure? ──────────────────────────────────────────
+        d1 = _DeleteDialog(
+            self,
+            title="Confirm Deletion",
+            icon="🗑",
+            headline=f"Delete the selected {noun}?",
+            body=(
+                f"You have marked {count} {noun} for deletion.\n"
+                "They will be moved to the Recycle Bin and can be restored if needed."
+            ),
+            btn_cancel="Cancel",
+            btn_confirm="Confirm",
+            confirm_dangerous=True,
+        )
+        if not d1.result:
+            return
+
+        # ── Step 2: Breakdown ──────────────────────────────────────────────
+        breakdown = _delete_breakdown(selected, mode)
+        reclaimable = sum(_fd_size(f) for f in selected)
+        reclaimable_str = format_bytes(reclaimable, decimals=1)
+
+        d2 = _DeleteDialog(
+            self,
+            title="Move to Recycle Bin",
+            icon="♻",
+            headline="Moving to Recycle Bin",
+            body=f"{breakdown} will be moved to the Recycle Bin.\n\nEstimated space freed: {reclaimable_str}",
+            btn_cancel="Cancel",
+            btn_confirm="Allow",
+            confirm_dangerous=False,
+        )
+        if not d2.result:
+            return
+
+        # ── Step 3: Progress ──────────────────────────────────────────────
+        prog = _DeleteProgressDialog(self, total=count)
+
+        success_count: List[int] = [0]
+        deleted_paths: List[str] = []
+        deleted_entries: List[Any] = []
+        failed_files: List[tuple] = []
+
+        def _worker() -> None:
+            from cerebro.core.deletion import DeletionEngine, DeletionPolicy, DeletionRequest
+            engine = DeletionEngine()
+            request = DeletionRequest(
+                policy=DeletionPolicy.TRASH,
+                metadata={"source": "ui_selected", "mode": "trash"},
+            )
+            for i, file_data in enumerate(selected):
+                try:
+                    file_path = Path(_fd_path(file_data)).resolve()
+                except (OSError, ValueError):
+                    file_path = Path(_fd_path(file_data))
+                try:
+                    res = engine.delete_one(file_path, request)
+                    if res.success:
+                        success_count[0] += 1
+                        deleted_paths.append(str(file_path))
+                        deleted_entries.append(file_data)
+                        log_deletion_event(str(file_path), _fd_size(file_data), mode)
+                    else:
+                        failed_files.append((str(file_path), res.error or "Unknown error"))
+                except (OSError, ValueError, RuntimeError, AttributeError,
+                        TypeError, KeyError, ImportError) as exc:
+                    failed_files.append((str(file_path), str(exc)))
+                self.after(0, lambda done=i + 1: prog.set_progress(done))
+            self.after(0, prog.close)
+
+        threading.Thread(target=_worker, daemon=True, name="delete-flow").start()
+        prog.wait()  # nested event loop — exits when close() destroys the dialog
+
+        # ── Apply model changes before showing summary ────────────────────
+        self._toolbar.set_has_selection(False)
+        if deleted_entries:
+            self._remove_deleted_files(deleted_entries)
+        self._status_bar.update_reclaimable(self._results_panel.get_reclaimable_space())
+
+        if failed_files:
+            failed_list = "\n".join(
+                f"  • {Path(f).name}: {e}" for f, e in failed_files[:5]
+            )
+            more = (
+                f"\n  … and {len(failed_files) - 5} more"
+                if len(failed_files) > 5 else ""
+            )
             self.show_info(
-                "Delete Selected",
-                "No files selected for deletion."
+                "Deletion Partial",
+                f"Deleted {success_count[0]} of {count} {noun}.\n\nFailed:\n{failed_list}{more}",
+            )
+            self._status_bar.flash_message(
+                f"Deleted {success_count[0]} of {count} {noun}."
             )
             return
 
-        reclaimable_space = self._results_panel.get_reclaimable_space()
-        reclaimable_str = format_bytes(reclaimable_space, decimals=1)
+        # ── Step 4: Summary ───────────────────────────────────────────────
+        recovered = sum(_fd_size(f) for f in deleted_entries)
+        d4 = _DeleteSummaryDialog(
+            self, noun=noun, count=success_count[0], recovered=recovered
+        )
+        self._status_bar.flash_message(f"Deleted {success_count[0]} {noun}.")
 
-        confirm = True
-        if self._app_settings.general.get("confirm_before_delete", True):
-            confirm = self.confirm_action(
-                "Send to Recycle Bin",
-                f"Send {len(selected_files)} files to the Recycle Bin?\n\n"
-                f"Space freed: {reclaimable_str}\n\n"
-                f"You can restore them from the Recycle Bin if needed."
-            )
+        if d4.result == "ok":
+            self._delete_celebrate(noun)
+        else:  # "rescan"
+            self._on_start_search()
 
-        if confirm:
-            self._toolbar.set_has_selection(False)
-            self._status_bar.flash_message("Deleting selected files...")
-
-            def _delete_worker() -> None:
-                from cerebro.core.deletion import DeletionEngine, DeletionPolicy, DeletionRequest
-
-                engine = DeletionEngine()
-                request = DeletionRequest(
-                    policy=DeletionPolicy.TRASH,
-                    metadata={
-                        "scan_id": getattr(self, "_current_scan_id", "") or "",
-                        "source": "ui_selected",
-                        "mode": "trash",
-                    },
-                )
-
-                success_count = 0
-                failed_files: List[tuple[str, str]] = []
-                deleted_paths: List[str] = []
-                deleted_entries: List[Any] = []
-
-                for file_data in selected_files:
-                    try:
-                        file_path = Path(_fd_path(file_data)).resolve()
-                    except (OSError, ValueError, RuntimeError, AttributeError, TypeError, KeyError, ImportError):
-                        file_path = Path(_fd_path(file_data))
-                    try:
-                        res = engine.delete_one(file_path, request)
-                        if res.success:
-                            success_count += 1
-                            deleted_paths.append(str(file_path))
-                            deleted_entries.append(file_data)
-                            log_deletion_event(
-                                str(file_path),
-                                _fd_size(file_data),
-                                self.get_scan_mode(),
-                            )
-                        else:
-                            failed_files.append((str(file_path), res.error or "Unknown error"))
-                    except (OSError, ValueError, RuntimeError, AttributeError, TypeError, KeyError, ImportError) as e:
-                        failed_files.append((str(file_path), str(e)))
-
-                self.after(
-                    0,
-                    lambda: self._finalize_delete_selected(
-                        selected_files=selected_files,
-                        deleted_entries=deleted_entries,
-                        deleted_paths=deleted_paths,
-                        failed_files=failed_files,
-                        success_count=success_count,
-                        reclaimable_str=reclaimable_str,
-                    ),
-                )
-
-            threading.Thread(target=_delete_worker, daemon=True, name="delete-selected").start()
-
-    def _finalize_delete_selected(
-        self,
-        *,
-        selected_files: List[Any],
-        deleted_entries: List[Any],
-        deleted_paths: List[str],
-        failed_files: List[tuple[str, str]],
-        success_count: int,
-        reclaimable_str: str,
-    ) -> None:
-        """Apply UI updates after background recycle-bin operation finishes."""
-        if failed_files:
-            failed_list = "\n".join(f"{f}: {e}" for f, e in failed_files[:5])
-            more = f"\n... and {len(failed_files) - 5} more" if len(failed_files) > 5 else ""
-            FeedbackPanel(
-                self,
-                "Delete Partially Failed",
-                f"Deleted {success_count}/{len(selected_files)} files.\n\n"
-                f"Failed:\n{failed_list}{more}",
-                type="warning",
-            )
-        elif success_count > 0:
-            _UndoToast(self, success_count, reclaimable_str, deleted_paths)
-
-        if deleted_entries:
-            self._remove_deleted_files(deleted_entries)
-
-        # Deletion refresh already renders remaining rows unchecked.
-        self._toolbar.set_has_selection(False)
-        new_reclaimable = self._results_panel.get_reclaimable_space()
-        self._status_bar.update_reclaimable(new_reclaimable)
-        if success_count > 0:
-            self._status_bar.flash_message(f"Deleted {success_count} file(s).")
-        elif failed_files:
-            self._status_bar.flash_message("No files were deleted (some failed).")
+    def _delete_celebrate(self, noun: str) -> None:
+        """Show 7-second celebratory overlay then return to the welcome screen."""
+        _DeleteCelebration(self, noun=noun, on_done=self._on_back_to_start)
 
     def _remove_deleted_files(self, deleted_files: List[Dict[str, Any]]) -> None:
         """
@@ -1426,6 +1487,311 @@ class _UndoToast:
                 "Select the files and choose 'Restore' to recover them.",
             )
         self._dismiss()
+
+
+# =============================================================================
+# Delete-flow dialog widgets
+# =============================================================================
+
+class _DeleteDialog:
+    """Blocking two-button modal confirmation dialog used by the delete flow."""
+
+    def __init__(self, parent, *, title: str, icon: str, headline: str, body: str,
+                 btn_cancel: str, btn_confirm: str, confirm_dangerous: bool = False):
+        self.result: bool = False
+
+        try:
+            import customtkinter as _ctk
+            win = _ctk.CTkToplevel(parent)
+            win.configure(fg_color=theme_color("base.backgroundElevated"))
+        except Exception:
+            win = tk.Toplevel(parent)
+            win.configure(bg=theme_color("base.backgroundElevated"))
+
+        self._win = win
+        win.title(title)
+        win.resizable(False, False)
+        win.transient(parent)
+        win.protocol("WM_DELETE_WINDOW", lambda: None)
+
+        bg = theme_color("base.backgroundElevated")
+        pad = 24
+
+        # Icon + headline
+        header = tk.Frame(win, bg=bg)
+        header.pack(fill="x", padx=pad, pady=(pad, 0))
+        tk.Label(header, text=icon, font=("", 26),
+                 bg=bg, fg=theme_color("base.foreground")).pack(side="left", padx=(0, 12))
+        tk.Label(header, text=headline, font=("", 15, "bold"),
+                 bg=bg, fg=theme_color("base.foreground"),
+                 justify="left", wraplength=340).pack(side="left")
+
+        # Body
+        tk.Label(win, text=body, font=("", 11),
+                 bg=bg, fg=theme_color("base.foregroundSecondary"),
+                 justify="left", wraplength=400, anchor="w").pack(
+            fill="x", padx=pad, pady=(12, 20))
+
+        # Divider
+        tk.Frame(win, height=1, bg="#2d3748").pack(fill="x")
+
+        # Buttons
+        btn_row = tk.Frame(win, bg=bg)
+        btn_row.pack(fill="x", padx=pad, pady=(12, pad))
+
+        confirm_bg = (
+            theme_color("button.danger") if confirm_dangerous
+            else theme_color("button.primary")
+        )
+
+        def _confirm() -> None:
+            self.result = True
+            win.destroy()
+
+        def _cancel() -> None:
+            self.result = False
+            win.destroy()
+
+        tk.Button(
+            btn_row, text=btn_cancel, command=_cancel,
+            font=("", 11), relief="flat", padx=16, pady=6,
+            bg=theme_color("button.secondary"),
+            fg=theme_color("base.foreground"), cursor="hand2",
+        ).pack(side="right", padx=(8, 0))
+
+        tk.Button(
+            btn_row, text=btn_confirm, command=_confirm,
+            font=("", 11, "bold"), relief="flat", padx=16, pady=6,
+            bg=confirm_bg, fg="#ffffff", cursor="hand2",
+        ).pack(side="right")
+
+        win.update_idletasks()
+        win.minsize(440, 1)
+        px = parent.winfo_rootx() + max(0, (parent.winfo_width()  - win.winfo_width())  // 2)
+        py = parent.winfo_rooty() + max(0, (parent.winfo_height() - win.winfo_height()) // 2)
+        win.geometry(f"+{px}+{py}")
+        win.grab_set()
+        parent.wait_window(win)
+
+
+class _DeleteProgressDialog:
+    """Modal progress dialog shown while files are being moved to the Recycle Bin."""
+
+    def __init__(self, parent, *, total: int):
+        self._parent = parent
+        self._total = max(1, total)
+        self._closed = False
+
+        try:
+            import customtkinter as _ctk
+            win = _ctk.CTkToplevel(parent)
+            win.configure(fg_color=theme_color("base.backgroundElevated"))
+        except Exception:
+            win = tk.Toplevel(parent)
+            win.configure(bg=theme_color("base.backgroundElevated"))
+
+        self._win = win
+        win.title("Deleting…")
+        win.resizable(False, False)
+        win.transient(parent)
+        win.protocol("WM_DELETE_WINDOW", lambda: None)
+
+        bg = theme_color("base.backgroundElevated")
+        pad = 28
+
+        tk.Label(win, text="🗑  Moving files to Recycle Bin…",
+                 font=("", 14, "bold"), bg=bg,
+                 fg=theme_color("base.foreground")).pack(padx=pad, pady=(pad, 6))
+
+        self._label = tk.Label(win, text=f"0 of {total}",
+                               font=("", 11), bg=bg,
+                               fg=theme_color("base.foregroundSecondary"))
+        self._label.pack(padx=pad)
+
+        bar_frame = tk.Frame(win, bg=bg)
+        bar_frame.pack(fill="x", padx=pad, pady=(10, pad))
+
+        self._use_ctk_bar = False
+        try:
+            import customtkinter as _ctk
+            self._pbar = _ctk.CTkProgressBar(bar_frame, width=380, height=14)
+            self._pbar.pack(fill="x")
+            self._pbar.set(0)
+            self._use_ctk_bar = True
+        except Exception:
+            self._canvas = tk.Canvas(bar_frame, height=10, bg="#2d3748",
+                                     highlightthickness=0, width=380)
+            self._canvas.pack(fill="x")
+
+        win.update_idletasks()
+        win.minsize(440, 1)
+        px = parent.winfo_rootx() + max(0, (parent.winfo_width()  - win.winfo_width())  // 2)
+        py = parent.winfo_rooty() + max(0, (parent.winfo_height() - win.winfo_height()) // 2)
+        win.geometry(f"+{px}+{py}")
+        win.grab_set()
+
+    def set_progress(self, done: int) -> None:
+        if self._closed:
+            return
+        try:
+            pct = min(1.0, done / self._total)
+            self._label.configure(text=f"{done} of {self._total}")
+            if self._use_ctk_bar:
+                self._pbar.set(pct)
+            else:
+                self._canvas.update_idletasks()
+                w = self._canvas.winfo_width() or 380
+                self._canvas.delete("all")
+                self._canvas.create_rectangle(
+                    0, 0, int(w * pct), 10, fill="#4fc3f7", outline=""
+                )
+        except (tk.TclError, AttributeError):
+            pass
+
+    def close(self) -> None:
+        self._closed = True
+        try:
+            self._win.grab_release()
+            self._win.destroy()
+        except (tk.TclError, AttributeError):
+            pass
+
+    def wait(self) -> None:
+        try:
+            self._parent.wait_window(self._win)
+        except (tk.TclError, AttributeError):
+            pass
+
+
+class _DeleteSummaryDialog:
+    """Summary dialog shown after all deletions finish. result = 'ok' | 'rescan'."""
+
+    def __init__(self, parent, *, noun: str, count: int, recovered: int):
+        self.result: str = "ok"
+        recovered_str = format_bytes(recovered, decimals=1)
+
+        try:
+            import customtkinter as _ctk
+            win = _ctk.CTkToplevel(parent)
+            win.configure(fg_color=theme_color("base.backgroundElevated"))
+        except Exception:
+            win = tk.Toplevel(parent)
+            win.configure(bg=theme_color("base.backgroundElevated"))
+
+        self._win = win
+        win.title("Deletion Complete")
+        win.resizable(False, False)
+        win.transient(parent)
+        win.protocol("WM_DELETE_WINDOW", lambda: None)
+
+        bg = theme_color("base.backgroundElevated")
+        success_color = theme_color("feedback.success")
+        pad = 28
+
+        # Success accent strip
+        tk.Frame(win, height=6, bg=success_color).pack(fill="x")
+
+        tk.Label(win, text="✓  Deletion complete",
+                 font=("", 18, "bold"), bg=bg,
+                 fg=success_color).pack(padx=pad, pady=(20, 6))
+
+        tk.Label(win,
+                 text=f"{count} similar {noun} deleted\nSpace recovered: {recovered_str}",
+                 font=("", 13), bg=bg,
+                 fg=theme_color("base.foreground"),
+                 justify="center").pack(padx=pad, pady=(0, 24))
+
+        tk.Frame(win, height=1, bg="#2d3748").pack(fill="x")
+
+        btn_row = tk.Frame(win, bg=bg)
+        btn_row.pack(fill="x", padx=pad, pady=(14, pad))
+
+        def _rescan() -> None:
+            self.result = "rescan"
+            win.destroy()
+
+        def _ok() -> None:
+            self.result = "ok"
+            win.destroy()
+
+        tk.Button(
+            btn_row, text="Rescan", command=_rescan,
+            font=("", 11), relief="flat", padx=14, pady=7,
+            bg=theme_color("button.secondary"),
+            fg=theme_color("base.foreground"), cursor="hand2",
+        ).pack(side="left")
+
+        tk.Button(
+            btn_row, text="OK", command=_ok,
+            font=("", 11, "bold"), relief="flat", padx=28, pady=7,
+            bg=theme_color("button.primary"),
+            fg="#ffffff", cursor="hand2",
+        ).pack(side="right")
+
+        win.update_idletasks()
+        win.minsize(400, 1)
+        px = parent.winfo_rootx() + max(0, (parent.winfo_width()  - win.winfo_width())  // 2)
+        py = parent.winfo_rooty() + max(0, (parent.winfo_height() - win.winfo_height()) // 2)
+        win.geometry(f"+{px}+{py}")
+        win.grab_set()
+        parent.wait_window(win)
+
+
+class _DeleteCelebration:
+    """
+    Full-window overlay shown after a clean delete.
+
+    Displays a thumbs-up + "No duplicate <noun> remain!" message for
+    DELAY_MS milliseconds, then calls on_done() to return to the welcome screen.
+    """
+
+    DELAY_MS = 7000
+
+    def __init__(self, parent, *, noun: str, on_done: Callable[[], None]):
+        self._parent = parent
+        self._on_done = on_done
+
+        win = tk.Toplevel(parent)
+        win.overrideredirect(True)
+        win.attributes("-topmost", True)
+
+        parent.update_idletasks()
+        w = parent.winfo_width()
+        h = parent.winfo_height()
+        x = parent.winfo_rootx()
+        y = parent.winfo_rooty()
+        win.geometry(f"{w}x{h}+{x}+{y}")
+
+        bg = theme_color("base.backgroundElevated")
+        win.configure(bg=bg)
+
+        outer = tk.Frame(win, bg=bg)
+        outer.place(relx=0.5, rely=0.5, anchor="center")
+
+        tk.Label(outer, text="👍", font=("", 80),
+                 bg=bg).pack(pady=(0, 20))
+
+        tk.Label(outer,
+                 text=f"No duplicate {noun} remain!",
+                 font=("", 24, "bold"), bg=bg,
+                 fg=theme_color("feedback.success")).pack(pady=(0, 10))
+
+        tk.Label(outer, text="Your collection is clean.",
+                 font=("", 14), bg=bg,
+                 fg=theme_color("base.foregroundSecondary")).pack()
+
+        self._win = win
+        self._after_id = parent.after(self.DELAY_MS, self._finish)
+
+    def _finish(self) -> None:
+        try:
+            self._win.destroy()
+        except tk.TclError:
+            pass
+        try:
+            self._on_done()
+        except Exception:
+            pass
 
 
 # --- CTkMessageInterface implementation ---
