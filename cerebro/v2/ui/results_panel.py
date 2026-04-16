@@ -72,7 +72,7 @@ def friendly_stage_label(stage: str) -> str:
 
 
 class _ScanCompleteBanner(CTkFrame):
-    """Thin summary strip after a scan finishes (persists until dismissed)."""
+    """Prominent summary card after a scan finishes (persists until dismissed)."""
 
     def __init__(
         self,
@@ -82,7 +82,7 @@ class _ScanCompleteBanner(CTkFrame):
         on_dismiss: Callable[[], None],
         **kwargs,
     ) -> None:
-        super().__init__(master, height=48, **kwargs)
+        super().__init__(master, height=92, **kwargs)
         self._on_auto_mark = on_auto_mark
         self._on_dismiss = on_dismiss
         self._auto_btn: Optional[CTkButton] = None
@@ -112,34 +112,46 @@ class _ScanCompleteBanner(CTkFrame):
 
         dur = _format_duration(elapsed_seconds)
         if final_state == ScanState.COMPLETED and groups_found == 0:
-            text = f"✓  Scan complete  —  No duplicates found  •  {dur}"
+            headline = "Scan complete"
+            detail = f"Scan complete — No duplicates found in {dur}."
             border = theme_color("feedback.success")
         elif final_state == ScanState.COMPLETED:
-            text = (
-                f"✓  Scan complete  —  Found {duplicates_found:,} duplicates in {groups_found:,} groups"
-                f"  •  {format_bytes(bytes_reclaimable)} reclaimable  •  {dur}"
+            headline = "Duplicates found"
+            detail = (
+                f"Scan complete — {duplicates_found:,} duplicates across {groups_found:,} groups"
+                f" • Potential reclaim: {format_bytes(bytes_reclaimable)} • Time: {dur}"
             )
             border = theme_color("feedback.success")
         elif final_state == ScanState.CANCELLED:
-            text = (
-                f"⏹  Scan cancelled  —  {groups_found:,} groups found before stopping  •  {dur}"
-            )
+            headline = "Scan cancelled"
+            detail = f"{groups_found:,} groups were found before stopping • {dur}"
             try:
                 border = theme_color("feedback.warning")
             except (tk.TclError, AttributeError, ValueError):
                 border = theme_color("base.foregroundSecondary")
         else:
-            text = "⚠  Scan failed  —  see logs for details"
+            headline = "Scan failed"
+            detail = "See logs for details."
             border = theme_color("button.danger")
 
-        stripe = CTkFrame(self._inner, width=4, fg_color=border, corner_radius=0)
+        stripe = CTkFrame(self._inner, width=6, fg_color=border, corner_radius=0)
         stripe.pack(side="left", fill="y")
 
         row = CTkFrame(self._inner, fg_color="transparent")
-        row.pack(side="left", fill="both", expand=True, padx=(Spacing.SM, Spacing.MD), pady=Spacing.SM)
+        row.pack(side="left", fill="both", expand=True, padx=(Spacing.SM, Spacing.MD), pady=(Spacing.SM, Spacing.XS))
+
+        header = CTkFrame(row, fg_color="transparent")
+        header.pack(fill="x")
+        CTkLabel(
+            header,
+            text=headline,
+            font=("", 19, "bold"),
+            text_color=theme_color("base.foreground"),
+            anchor="w",
+        ).pack(side="left")
 
         dismiss = CTkButton(
-            row,
+            header,
             text="×",
             width=32,
             height=28,
@@ -150,9 +162,11 @@ class _ScanCompleteBanner(CTkFrame):
         )
         dismiss.pack(side="right")
 
+        actions = CTkFrame(row, fg_color="transparent")
+        actions.pack(side="bottom", fill="x", pady=(Spacing.XS, 0))
         if final_state == ScanState.COMPLETED and groups_found > 0:
             self._auto_btn = CTkButton(
-                row,
+                actions,
                 text="Auto-mark",
                 width=100,
                 height=28,
@@ -165,13 +179,13 @@ class _ScanCompleteBanner(CTkFrame):
 
         self._text_label = CTkLabel(
             row,
-            text=text,
-            font=Typography.FONT_MD,
-            text_color=theme_color("base.foreground"),
+            text=detail,
+            font=Typography.FONT_SM,
+            text_color=theme_color("base.foregroundSecondary"),
             anchor="w",
             justify="left",
         )
-        self._text_label.pack(side="left", fill="both", expand=True)
+        self._text_label.pack(side="top", fill="x", pady=(Spacing.XS, 0))
 
         if not self.winfo_ismapped():
             self.pack(fill="x", padx=Spacing.XS, pady=(Spacing.XS, 0), before=self.master._status_frame)
@@ -529,6 +543,7 @@ class ResultsPanel(CTkFrame):
         self._thumbnail_grid: Any = None
         self._results_view_mode: str = "list"
         self._syncing_checks: bool = False
+        self._bulk_selection_in_progress: bool = False
         self._on_file_row_focus: Optional[Callable[[str], None]] = None
 
     def _fd_path(self, fd) -> str:
@@ -744,7 +759,7 @@ class ResultsPanel(CTkFrame):
 
     def _on_check_changed(self, _item_id: str, _checked: bool) -> None:
         """Handle checkbox state change."""
-        if self._syncing_checks:
+        if self._syncing_checks or self._bulk_selection_in_progress:
             return
         self._selected_count = len(self._treeview.get_checked())
 
@@ -1436,136 +1451,130 @@ class ResultsPanel(CTkFrame):
         Args:
             rule: Selection rule identifier.
         """
-        # Clear current selection
-        self._treeview.uncheck_all()
-        self._selected_count = 0
+        self._bulk_selection_in_progress = True
+        try:
+            # Clear current selection
+            self._treeview.uncheck_all()
+            self._selected_count = 0
 
-        if rule == "select_all":
-            self._treeview.check_all()
-            self._selected_count = self._total_items
+            if rule == "select_all":
+                self._treeview.check_all()
 
-        elif rule == "select_except_largest":
-            # Keep largest in each group, select others
-            for group in self._filtered_groups:
-                keeper_idx = group.get_keeper_index()
-                for i, file_data in enumerate(group.files):
-                    if i != keeper_idx:
-                        item_id = f"{group.group_id}_{i}"
-                        self._treeview.set_check(item_id, True)
-                        self._selected_count += 1
-
-        elif rule == "select_except_smallest":
-            # Keep smallest in each group, select others
-            for group in self._filtered_groups:
-                keeper_idx = min(
-                    range(len(group.files)),
-                    key=lambda i: group.files[i].size
-                )
-                for i in range(len(group.files)):
-                    if i != keeper_idx:
-                        item_id = f"{group.group_id}_{i}"
-                        self._treeview.set_check(item_id, True)
-                        self._selected_count += 1
-
-        elif rule == "select_except_newest":
-            # Keep newest in each group, select others
-            for group in self._filtered_groups:
-                keeper_idx = max(
-                    range(len(group.files)),
-                    key=lambda i: group.files[i].modified
-                )
-                for i in range(len(group.files)):
-                    if i != keeper_idx:
-                        item_id = f"{group.group_id}_{i}"
-                        self._treeview.set_check(item_id, True)
-                        self._selected_count += 1
-
-        elif rule == "select_except_oldest":
-            # Keep oldest in each group, select others
-            for group in self._filtered_groups:
-                keeper_idx = min(
-                    range(len(group.files)),
-                    key=lambda i: group.files[i].modified
-                )
-                for i in range(len(group.files)):
-                    if i != keeper_idx:
-                        item_id = f"{group.group_id}_{i}"
-                        self._treeview.set_check(item_id, True)
-                        self._selected_count += 1
-
-        elif rule == "select_except_first":
-            # Keep first file in each group (index 0), select all others
-            for group in self._filtered_groups:
-                for i in range(1, len(group.files)):
-                    item_id = f"{group.group_id}_{i}"
-                    self._treeview.set_check(item_id, True)
-                    self._selected_count += 1
-
-        elif rule == "select_except_highest_resolution":
-            # For image/video groups: keep highest resolution, select others
-            for group in self._filtered_groups:
-                best_idx = 0
-                best_res = -1
-                for i, fd in enumerate(group.files):
-                    meta = fd.get("metadata", {}) if isinstance(fd, dict) else getattr(fd, "metadata", {})
-                    w = meta.get("width", 0) or 0
-                    h = meta.get("height", 0) or 0
-                    res = w * h
-                    if res > best_res:
-                        best_res = res
-                        best_idx = i
-                for i in range(len(group.files)):
-                    if i != best_idx:
-                        item_id = f"{group.group_id}_{i}"
-                        self._treeview.set_check(item_id, True)
-                        self._selected_count += 1
-
-        elif rule == "select_in_folder":
-            # Prompt user for a folder; select all files inside it
-            from tkinter import filedialog
-            folder = filedialog.askdirectory(title="Select folder — mark files inside it")
-            if folder:
-                folder_path = Path(folder)
+            elif rule == "select_except_largest":
+                # Keep largest in each group, select others
                 for group in self._filtered_groups:
-                    for i, fd in enumerate(group.files):
-                        path_str = fd.get("path", "") if isinstance(fd, dict) else str(getattr(fd, "path", ""))
-                        try:
-                            if Path(path_str).is_relative_to(folder_path):
-                                item_id = f"{group.group_id}_{i}"
-                                self._treeview.set_check(item_id, True)
-                                self._selected_count += 1
-                        except (OSError, ValueError) as exc:
-                            logger.debug("Path '%s' folder match failed: %s", path_str, exc)
-
-        elif rule == "select_by_extension":
-            # Prompt user for extensions (comma-separated); select matching files
-            from tkinter.simpledialog import askstring
-            raw = askstring(
-                "Select by Extension",
-                "Enter extensions to mark (comma-separated, e.g. .jpg,.png):"
-            )
-            if raw:
-                exts = {e.strip().lower().lstrip(".") for e in raw.split(",")}
-                exts = {f".{e}" if not e.startswith(".") else e for e in exts}
-                for group in self._filtered_groups:
-                    for i, fd in enumerate(group.files):
-                        path_str = fd.get("path", "") if isinstance(fd, dict) else str(getattr(fd, "path", ""))
-                        if Path(path_str).suffix.lower() in exts:
+                    keeper_idx = group.get_keeper_index()
+                    for i, _file_data in enumerate(group.files):
+                        if i != keeper_idx:
                             item_id = f"{group.group_id}_{i}"
                             self._treeview.set_check(item_id, True)
-                            self._selected_count += 1
 
-        elif rule == "clear_all":
-            pass  # already cleared above
+            elif rule == "select_except_smallest":
+                # Keep smallest in each group, select others
+                for group in self._filtered_groups:
+                    keeper_idx = min(
+                        range(len(group.files)),
+                        key=lambda i: group.files[i].size
+                    )
+                    for i in range(len(group.files)):
+                        if i != keeper_idx:
+                            item_id = f"{group.group_id}_{i}"
+                            self._treeview.set_check(item_id, True)
 
-        elif rule == "invert_selection":
-            self._treeview.invert_checks()
-            self._selected_count = self._total_items - self._selected_count
+            elif rule == "select_except_newest":
+                # Keep newest in each group, select others
+                for group in self._filtered_groups:
+                    keeper_idx = max(
+                        range(len(group.files)),
+                        key=lambda i: group.files[i].modified
+                    )
+                    for i in range(len(group.files)):
+                        if i != keeper_idx:
+                            item_id = f"{group.group_id}_{i}"
+                            self._treeview.set_check(item_id, True)
+
+            elif rule == "select_except_oldest":
+                # Keep oldest in each group, select others
+                for group in self._filtered_groups:
+                    keeper_idx = min(
+                        range(len(group.files)),
+                        key=lambda i: group.files[i].modified
+                    )
+                    for i in range(len(group.files)):
+                        if i != keeper_idx:
+                            item_id = f"{group.group_id}_{i}"
+                            self._treeview.set_check(item_id, True)
+
+            elif rule == "select_except_first":
+                # Keep first file in each group (index 0), select all others
+                for group in self._filtered_groups:
+                    for i in range(1, len(group.files)):
+                        item_id = f"{group.group_id}_{i}"
+                        self._treeview.set_check(item_id, True)
+
+            elif rule == "select_except_highest_resolution":
+                # For image/video groups: keep highest resolution, select others
+                for group in self._filtered_groups:
+                    best_idx = 0
+                    best_res = -1
+                    for i, fd in enumerate(group.files):
+                        meta = fd.get("metadata", {}) if isinstance(fd, dict) else getattr(fd, "metadata", {})
+                        w = meta.get("width", 0) or 0
+                        h = meta.get("height", 0) or 0
+                        res = w * h
+                        if res > best_res:
+                            best_res = res
+                            best_idx = i
+                    for i in range(len(group.files)):
+                        if i != best_idx:
+                            item_id = f"{group.group_id}_{i}"
+                            self._treeview.set_check(item_id, True)
+
+            elif rule == "select_in_folder":
+                # Prompt user for a folder; select all files inside it
+                from tkinter import filedialog
+                folder = filedialog.askdirectory(title="Select folder — mark files inside it")
+                if folder:
+                    folder_path = Path(folder)
+                    for group in self._filtered_groups:
+                        for i, fd in enumerate(group.files):
+                            path_str = fd.get("path", "") if isinstance(fd, dict) else str(getattr(fd, "path", ""))
+                            try:
+                                if Path(path_str).is_relative_to(folder_path):
+                                    item_id = f"{group.group_id}_{i}"
+                                    self._treeview.set_check(item_id, True)
+                            except (OSError, ValueError) as exc:
+                                logger.debug("Path '%s' folder match failed: %s", path_str, exc)
+
+            elif rule == "select_by_extension":
+                # Prompt user for extensions (comma-separated); select matching files
+                from tkinter.simpledialog import askstring
+                raw = askstring(
+                    "Select by Extension",
+                    "Enter extensions to mark (comma-separated, e.g. .jpg,.png):"
+                )
+                if raw:
+                    exts = {e.strip().lower().lstrip(".") for e in raw.split(",")}
+                    exts = {f".{e}" if not e.startswith(".") else e for e in exts}
+                    for group in self._filtered_groups:
+                        for i, fd in enumerate(group.files):
+                            path_str = fd.get("path", "") if isinstance(fd, dict) else str(getattr(fd, "path", ""))
+                            if Path(path_str).suffix.lower() in exts:
+                                item_id = f"{group.group_id}_{i}"
+                                self._treeview.set_check(item_id, True)
+
+            elif rule == "clear_all":
+                pass  # already cleared above
+
+            elif rule == "invert_selection":
+                self._treeview.invert_checks()
+        finally:
+            self._bulk_selection_in_progress = False
 
         self._selected_count = len(self._treeview.get_checked())
         self._update_status()
         self._sync_thumbnail_checks_from_tree()
-        # Notify callback
+        # Notify callback once at end (prevents UI freeze/crash on huge sets)
         if self._on_selection_changed:
             self._on_selection_changed(self._get_checked_item_ids())
 

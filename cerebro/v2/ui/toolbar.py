@@ -52,6 +52,7 @@ class Toolbar(CTkFrame):
     Full-width toolbar matching Ashisoft Duplicate File Finder Pro 8.2.
 
     Public API (callbacks):
+        on_back(cb)             — Back/Start button
         on_add_path(cb)         — Add Path button
         on_remove_selected(cb)  — Remove button
         on_start_search(cb)     — Search Now button
@@ -76,6 +77,7 @@ class Toolbar(CTkFrame):
 
         # Callbacks
         self._on_add_path:        Optional[Callable[[], None]] = None
+        self._on_back:            Optional[Callable[[], None]] = None
         self._on_remove_selected: Optional[Callable[[], None]] = None
         self._on_start_search:    Optional[Callable[[], None]] = None
         self._on_stop_search:     Optional[Callable[[], None]] = None
@@ -89,6 +91,7 @@ class Toolbar(CTkFrame):
 
         # Widgets (set in _build_widgets)
         self._add_path_btn:  Optional[CTkButton] = None
+        self._back_btn:      Optional[CTkButton] = None
         self._remove_btn:    Optional[CTkButton] = None
         self._sep1:          Optional[CTkLabel]  = None
         self._start_btn:     Optional[CTkButton] = None
@@ -131,6 +134,13 @@ class Toolbar(CTkFrame):
             fg_color=sec, hover_color=secH,
             border_width=1, border_color=bdr, corner_radius=rad,
             command=self._trigger_add_path,
+        )
+        self._back_btn = CTkButton(
+            self, text="← Start",
+            width=94, height=h, font=fw,
+            fg_color=sec, hover_color=secH,
+            border_width=1, border_color=bdr, corner_radius=rad,
+            command=self._trigger_back,
         )
         self._remove_btn = CTkButton(
             self, text="✕ Remove",
@@ -228,7 +238,7 @@ class Toolbar(CTkFrame):
         pad = (Spacing.XS, Spacing.XS)
 
         for btn in (
-            self._add_path_btn, self._remove_btn,
+            self._add_path_btn, self._back_btn, self._remove_btn,
             self._sep1,
             self._start_btn,
             # _stop_btn intentionally NOT packed here — shown dynamically
@@ -251,6 +261,10 @@ class Toolbar(CTkFrame):
     def _trigger_add_path(self) -> None:
         if self._on_add_path:
             self._on_add_path()
+
+    def _trigger_back(self) -> None:
+        if self._on_back:
+            self._on_back()
 
     def _trigger_remove(self) -> None:
         if self._on_remove_selected:
@@ -353,6 +367,7 @@ class Toolbar(CTkFrame):
     # ------------------------------------------------------------------
 
     def on_add_path(self, cb: Callable[[], None]) -> None:        self._on_add_path = cb
+    def on_back(self, cb: Callable[[], None]) -> None:            self._on_back = cb
     def on_remove_selected(self, cb: Callable[[], None]) -> None: self._on_remove_selected = cb
     def on_start_search(self, cb: Callable[[], None]) -> None:    self._on_start_search = cb
     def on_stop_search(self, cb: Callable[[], None]) -> None:     self._on_stop_search = cb
@@ -420,6 +435,7 @@ class Toolbar(CTkFrame):
         except (OSError, ValueError, RuntimeError, AttributeError, TypeError, KeyError, ImportError): pass
 
         pairs = [
+            (self._back_btn,      "button.secondary",  "button.secondaryHover"),
             (self._add_path_btn,  "button.secondary",  "button.secondaryHover"),
             (self._remove_btn,    "button.secondary",  "button.secondaryHover"),
             (self._start_btn,     "button.primary",    "button.primaryHover"),

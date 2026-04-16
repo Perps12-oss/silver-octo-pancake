@@ -531,6 +531,62 @@ class UnionFind:
         return self._count
 
 
+class HammingBKTree:
+    """
+    BK-tree for integer hashes under Hamming distance.
+
+    Supports exact radius queries (no approximation), which is ideal for
+    reducing pairwise comparisons in perceptual-hash clustering.
+    """
+
+    class _Node:
+        __slots__ = ("value", "items", "children")
+
+        def __init__(self, value: int, item: int) -> None:
+            self.value: int = value
+            self.items: List[int] = [item]
+            self.children: Dict[int, "HammingBKTree._Node"] = {}
+
+    def __init__(self) -> None:
+        self._root: Optional[HammingBKTree._Node] = None
+
+    def add(self, value: int, item: int) -> None:
+        if self._root is None:
+            self._root = self._Node(value, item)
+            return
+
+        node = self._root
+        while node is not None:
+            if value == node.value:
+                node.items.append(item)
+                return
+            dist = hamming_distance(value, node.value)
+            child = node.children.get(dist)
+            if child is None:
+                node.children[dist] = self._Node(value, item)
+                return
+            node = child
+
+    def query(self, value: int, max_distance: int) -> List[int]:
+        if self._root is None:
+            return []
+
+        results: List[int] = []
+        stack: List[HammingBKTree._Node] = [self._root]
+        while stack:
+            node = stack.pop()
+            dist = hamming_distance(value, node.value)
+            if dist <= max_distance:
+                results.extend(node.items)
+
+            low = dist - max_distance
+            high = dist + max_distance
+            for edge_dist, child in node.children.items():
+                if low <= edge_dist <= high:
+                    stack.append(child)
+        return results
+
+
 # ============================================================================
 # Hamming Distance
 # ============================================================================
@@ -575,6 +631,7 @@ __all__ = [
     "load_image",
     "get_image_metadata",
     "UnionFind",
+    "HammingBKTree",
     "hamming_distance",
     "similarity_from_hamming",
 ]

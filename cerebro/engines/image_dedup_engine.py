@@ -41,7 +41,12 @@ from cerebro.engines.base_engine import (
     EngineOption
 )
 from cerebro.engines.hash_cache import HashCache
-from cerebro.engines.image_formats import UnionFind, hamming_distance, similarity_from_hamming
+from cerebro.engines.image_formats import (
+    UnionFind,
+    HammingBKTree,
+    hamming_distance,
+    similarity_from_hamming,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -459,6 +464,7 @@ class ImageDedupEngine(BaseEngine):
         # Hashing is the dominant cost in photo mode; parallelize misses.
         records_by_idx: list[Optional[dict]] = [None] * total_files
         future_to_job: dict = {}
+        cache_entries: list[tuple[str, float, int, str, str]] = []
         for idx, image_path in enumerate(image_files):
             if self._cancel_event.is_set():
                 return []
@@ -513,8 +519,9 @@ class ImageDedupEngine(BaseEngine):
             if hashes:
                 phash_hex, dhash_hex, phash_int, dhash_int, width, height = hashes
                 if self._cache is not None:
-                    self._cache.set(image_path, mtime, size, "phash", phash_hex)
-                    self._cache.set(image_path, mtime, size, "dhash", dhash_hex)
+                    path_str = str(image_path)
+                    cache_entries.append((path_str, mtime, size, "phash", phash_hex))
+                    cache_entries.append((path_str, mtime, size, "dhash", dhash_hex))
                 records_by_idx[idx] = {
                     "path": image_path,
                     "size": size,
@@ -532,6 +539,8 @@ class ImageDedupEngine(BaseEngine):
             self._progress.current_file = str(image_path)
             if (processed % 25 == 0 or processed == total_files) and self._callback:
                 self._callback(dataclasses.replace(self._progress))
+        if self._cache is not None and cache_entries:
+            self._cache.set_many(cache_entries)
 
         records: list[dict] = [r for r in records_by_idx if r is not None]
         if not records:
@@ -542,16 +551,21 @@ class ImageDedupEngine(BaseEngine):
             uf.add(idx)
 
         # Connectivity rule: both pHash and dHash distances must satisfy thresholds.
+        # Use BK-tree exact-radius lookup on pHash to avoid O(n^2) full cross-product.
         phash_threshold = int(self._options.get("phash_threshold", 8))
         dhash_threshold = int(self._options.get("dhash_threshold", 10))
         t_cluster_start = time.perf_counter()
-        for i in range(len(records)):
-            for j in range(i + 1, len(records)):
-                a = records[i]
+        phash_tree = HammingBKTree()
+        for i, rec in enumerate(records):
+            phash_tree.add(rec["phash_int"], i)
+
+        for i, a in enumerate(records):
+            for j in phash_tree.query(a["phash_int"], phash_threshold):
+                if j <= i:
+                    continue
                 b = records[j]
-                ph_dist = (a["phash_int"] ^ b["phash_int"]).bit_count()
                 dh_dist = (a["dhash_int"] ^ b["dhash_int"]).bit_count()
-                if ph_dist <= phash_threshold and dh_dist <= dhash_threshold:
+                if dh_dist <= dhash_threshold:
                     uf.union(i, j)
         t_cluster_end = time.perf_counter()
 

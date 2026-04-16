@@ -186,6 +186,7 @@ class MainWindow(CTk, CTkMessageInterface):
 
         # Wire callbacks
         self._toolbar.on_add_path(self._on_add_path)
+        self._toolbar.on_back(self._on_back_to_start)
         self._toolbar.on_remove_selected(self._on_remove_path)
         self._toolbar.on_start_search(self._on_start_search)
         self._toolbar.on_stop_search(self._on_stop_search)
@@ -369,6 +370,42 @@ class MainWindow(CTk, CTkMessageInterface):
             logger.info("Removed folder from scan list")
         else:
             logger.debug("Remove folder requested with empty folder list")
+
+    def _on_back_to_start(self) -> None:
+        """Return from review state to the getting-started landing view."""
+        if self._scanning:
+            self._status_bar.flash_message("Stop scan before returning to start.")
+            return
+
+        self._scan_results.clear()
+        self._selected_file_ids = []
+        self._preview_focus_id = ""
+
+        try:
+            self._results_panel.hide_scan_complete()
+        except (AttributeError, tk.TclError):
+            pass
+        self._results_panel.clear()
+
+        try:
+            self._thumbnail_grid.clear()
+        except (AttributeError, tk.TclError):
+            pass
+        self._thumbnail_grid_dirty = True
+
+        if self._view_mode != "list":
+            self._toolbar.set_view_mode("list", fire_callback=False)
+            self._on_view_mode_changed("list")
+        else:
+            self._toolbar.set_has_selection(False)
+
+        try:
+            self._preview_panel.clear()
+            self._preview_panel.set_layout_mode("compact")
+        except (AttributeError, tk.TclError) as exc:
+            logger.debug("Preview reset on back-to-start skipped: %s", exc)
+
+        self._status_bar.flash_message("Back to start.")
 
     def _on_start_search(self) -> None:
         """Handle start search button."""
