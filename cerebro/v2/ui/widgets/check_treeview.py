@@ -69,6 +69,7 @@ class CheckTreeview(ttk.Treeview):
 
         # State
         self._item_states: dict[str, bool] = {}
+        self._item_values: dict[str, tuple] = {}  # cache of file values (without checkbox icon)
         self._group_rows: dict[str, str] = {}  # parent_id -> group_id
         self._group_child_counts: dict[str, int] = {}
         self._check_callback: Optional[Callable[[str, bool], None]] = None
@@ -176,6 +177,9 @@ class CheckTreeview(ttk.Treeview):
         file_values = kwargs.pop("values", ())
         row_tags = kwargs.pop("tags", self._get_row_tags(parent))
 
+        # Cache file values (without icon) for fast bulk icon refresh
+        self._item_values[item_id] = tuple(file_values)
+
         # Prepend checkbox icon to file values
         check_icon = CHECK_CHECKED if checked else CHECK_UNCHECKED
         combined_values = (check_icon,) + tuple(file_values)
@@ -215,7 +219,7 @@ class CheckTreeview(ttk.Treeview):
 
         self.set_check(item_id, new_state)
 
-    def set_check(self, item_id: str, checked: bool, *, notify: bool = True) -> None:
+    def set_check(self, item_id: str, checked: bool, *, notify: bool = True, update_display: bool = True) -> None:
         """
         Set checkbox state for an item.
 
@@ -223,19 +227,22 @@ class CheckTreeview(ttk.Treeview):
             item_id: The item ID to update.
             checked: New checkbox state.
             notify: Whether to emit callbacks/events for this change.
+            update_display: Whether to update the Tk widget icon immediately.
+                            Set False during bulk operations; call refresh_check_icons() after.
         """
         self._item_states[item_id] = checked
 
-        # Update the checkbox icon in the treeview
-        check_icon = CHECK_CHECKED if checked else CHECK_UNCHECKED
-
-        # Get current values
-        values = list(self.item(item_id)['values']) or []
-
-        # Update checkbox column value
-        if values:
-            values[0] = check_icon
-            self.item(item_id, values=tuple(values))
+        if update_display:
+            # Update the checkbox icon in the treeview
+            check_icon = CHECK_CHECKED if checked else CHECK_UNCHECKED
+            cached = self._item_values.get(item_id)
+            if cached is not None:
+                self.item(item_id, values=(check_icon,) + cached)
+            else:
+                values = list(self.item(item_id)['values']) or []
+                if values:
+                    values[0] = check_icon
+                    self.item(item_id, values=tuple(values))
 
         if notify:
             # Notify callback
@@ -249,19 +256,47 @@ class CheckTreeview(ttk.Treeview):
         """Check all items (not group headers)."""
         for item_id, state in self._item_states.items():
             if not state and item_id not in self._group_rows:
-                self.set_check(item_id, True, notify=notify)
+                self.set_check(item_id, True, notify=notify, update_display=notify)
 
     def uncheck_all(self, *, notify: bool = True) -> None:
         """Uncheck all items (not group headers)."""
         for item_id, state in self._item_states.items():
             if state and item_id not in self._group_rows:
-                self.set_check(item_id, False, notify=notify)
+                self.set_check(item_id, False, notify=notify, update_display=notify)
 
     def invert_checks(self, *, notify: bool = True) -> None:
         """Invert checkbox state for all items (not group headers)."""
         for item_id, state in self._item_states.items():
             if item_id not in self._group_rows:
-                self.set_check(item_id, not state, notify=notify)
+                self.set_check(item_id, not state, notify=notify, update_display=notify)
+
+    def refresh_check_icons(self) -> None:
+        """Sync all checkbox icons to current _item_states in one batched pass.
+
+        Call this after any bulk operation that used update_display=False / notify=False
+        (e.g. apply_selection_rule) to flush all icon changes to the Tk widget at once.
+        Yields to the event loop every 500 items so the window stays responsive.
+        """
+        for idx, (item_id, checked) in enumerate(self._item_states.items()):
+            if item_id in self._group_rows:
+                continue
+            check_icon = CHECK_CHECKED if checked else CHECK_UNCHECKED
+            try:
+                cached = self._item_values.get(item_id)
+                if cached is not None:
+                    self.item(item_id, values=(check_icon,) + cached)
+                else:
+                    values = list(self.item(item_id)['values']) or []
+                    if values:
+                        values[0] = check_icon
+                        self.item(item_id, values=tuple(values))
+            except tk.TclError:
+                pass
+            if idx % 500 == 499:
+                try:
+                    self.update_idletasks()
+                except tk.TclError:
+                    pass
 
     def check_group(self, group_id: str, *, notify: bool = True) -> None:
         """Check all items in a group."""
@@ -339,6 +374,7 @@ class CheckTreeview(ttk.Treeview):
             self._load_job = None
         self.delete(*self.get_children())
         self._item_states.clear()
+        self._item_values.clear()
         self._group_rows.clear()
         self._group_child_counts.clear()
         self._pending_data = []

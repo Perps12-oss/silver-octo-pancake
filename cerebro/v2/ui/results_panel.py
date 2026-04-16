@@ -1191,7 +1191,8 @@ class ResultsPanel(CTkFrame):
 
             # Yield to the UI loop periodically for very large result sets.
             # Without this, Tk can be marked "Not Responding" during bulk insert.
-            if group_idx % 15 == 0:
+            # Interval of 50 reduces redraw overhead vs the old value of 15.
+            if group_idx % 50 == 0:
                 try:
                     self.update_idletasks()
                 except tk.TclError as exc:
@@ -1286,8 +1287,13 @@ class ResultsPanel(CTkFrame):
         if self._on_request_start_search:
             self._on_request_start_search()
 
-    def _update_status(self) -> None:
-        """Update review summary strip labels."""
+    def _update_status(self, checked_ids: Optional[List[str]] = None) -> None:
+        """Update review summary strip labels.
+
+        Args:
+            checked_ids: Pre-computed list of checked item IDs. When provided the
+                         method skips the O(n) get_checked() scan entirely.
+        """
         from cerebro.v2.ui.mode_tabs import ScanMode
 
         total_files = sum(g.file_count for g in self._filtered_groups)
@@ -1298,13 +1304,15 @@ class ResultsPanel(CTkFrame):
         self._mode_view_label.configure(
             text=f"{ScanMode.display_name(self._current_mode)} • {view_label}"
         )
-        checked_ids = set(self._get_checked_item_ids())
+        if checked_ids is None:
+            checked_ids = self._get_checked_item_ids()
+        checked_set = set(checked_ids)
         marked_size = 0
         for g in self._filtered_groups:
             for i, fd in enumerate(g.files):
-                if f"{g.group_id}_{i}" in checked_ids:
+                if f"{g.group_id}_{i}" in checked_set:
                     marked_size += self._fd_size(fd)
-        self._selected_count = len(checked_ids)
+        self._selected_count = len(checked_set)
         self._selected_count_label.configure(text=f"Selected: {self._selected_count}")
         self._selected_size_label.configure(text=f"Marked size: {format_bytes(marked_size)}")
 
@@ -1531,17 +1539,19 @@ class ResultsPanel(CTkFrame):
             List of file data dictionaries for checked items.
         """
         checked_ids = self._get_checked_item_ids()
+        # O(1) group lookup — avoids O(n×groups) linear scan for large result sets
+        group_map = {g.group_id: g for g in self._filtered_groups}
         files = []
 
         for item_id in checked_ids:
-            # Parse item_id: group_index_file_index
             parts = item_id.split("_")
             if len(parts) == 2:
-                group_id = int(parts[0])
-                file_index = int(parts[1])
-
-                # Find group
-                group = next((g for g in self._filtered_groups if g.group_id == group_id), None)
+                try:
+                    group_id = int(parts[0])
+                    file_index = int(parts[1])
+                except ValueError:
+                    continue
+                group = group_map.get(group_id)
                 if group and file_index < len(group.files):
                     files.append(group.files[file_index])
 
@@ -1588,7 +1598,7 @@ class ResultsPanel(CTkFrame):
                     for i, _file_data in enumerate(group.files):
                         if i != keeper_idx:
                             item_id = f"{group.group_id}_{i}"
-                            self._treeview.set_check(item_id, True, notify=False)
+                            self._treeview.set_check(item_id, True, notify=False, update_display=False)
 
             elif rule == "select_except_smallest":
                 # Keep smallest in each group, select others
@@ -1600,7 +1610,7 @@ class ResultsPanel(CTkFrame):
                     for i in range(len(group.files)):
                         if i != keeper_idx:
                             item_id = f"{group.group_id}_{i}"
-                            self._treeview.set_check(item_id, True, notify=False)
+                            self._treeview.set_check(item_id, True, notify=False, update_display=False)
 
             elif rule == "select_except_newest":
                 # Keep newest in each group, select others
@@ -1612,7 +1622,7 @@ class ResultsPanel(CTkFrame):
                     for i in range(len(group.files)):
                         if i != keeper_idx:
                             item_id = f"{group.group_id}_{i}"
-                            self._treeview.set_check(item_id, True, notify=False)
+                            self._treeview.set_check(item_id, True, notify=False, update_display=False)
 
             elif rule == "select_except_oldest":
                 # Keep oldest in each group, select others
@@ -1624,14 +1634,14 @@ class ResultsPanel(CTkFrame):
                     for i in range(len(group.files)):
                         if i != keeper_idx:
                             item_id = f"{group.group_id}_{i}"
-                            self._treeview.set_check(item_id, True, notify=False)
+                            self._treeview.set_check(item_id, True, notify=False, update_display=False)
 
             elif rule == "select_except_first":
                 # Keep first file in each group (index 0), select all others
                 for group in self._filtered_groups:
                     for i in range(1, len(group.files)):
                         item_id = f"{group.group_id}_{i}"
-                        self._treeview.set_check(item_id, True, notify=False)
+                        self._treeview.set_check(item_id, True, notify=False, update_display=False)
 
             elif rule == "select_except_highest_resolution":
                 # For image/video groups: keep highest resolution, select others
@@ -1649,7 +1659,7 @@ class ResultsPanel(CTkFrame):
                     for i in range(len(group.files)):
                         if i != best_idx:
                             item_id = f"{group.group_id}_{i}"
-                            self._treeview.set_check(item_id, True, notify=False)
+                            self._treeview.set_check(item_id, True, notify=False, update_display=False)
 
             elif rule == "select_in_folder":
                 # Prompt user for a folder; select all files inside it
@@ -1663,7 +1673,7 @@ class ResultsPanel(CTkFrame):
                             try:
                                 if Path(path_str).is_relative_to(folder_path):
                                     item_id = f"{group.group_id}_{i}"
-                                    self._treeview.set_check(item_id, True, notify=False)
+                                    self._treeview.set_check(item_id, True, notify=False, update_display=False)
                             except (OSError, ValueError) as exc:
                                 logger.debug("Path '%s' folder match failed: %s", path_str, exc)
 
@@ -1682,7 +1692,7 @@ class ResultsPanel(CTkFrame):
                             path_str = fd.get("path", "") if isinstance(fd, dict) else str(getattr(fd, "path", ""))
                             if Path(path_str).suffix.lower() in exts:
                                 item_id = f"{group.group_id}_{i}"
-                                self._treeview.set_check(item_id, True, notify=False)
+                                self._treeview.set_check(item_id, True, notify=False, update_display=False)
 
             elif rule == "clear_all":
                 pass  # already cleared above
@@ -1692,12 +1702,15 @@ class ResultsPanel(CTkFrame):
         finally:
             self._bulk_selection_in_progress = False
 
-        self._selected_count = len(self._treeview.get_checked())
-        self._update_status()
+        # Single batched Tk pass to flush all icon changes accumulated above
+        self._treeview.refresh_check_icons()
+        # Compute checked list once and reuse — avoids 3× O(n) scans
+        checked_ids = self._treeview.get_checked()
+        self._selected_count = len(checked_ids)
+        self._update_status(checked_ids)
         self._sync_thumbnail_checks_from_tree()
-        # Notify callback once at end (prevents UI freeze/crash on huge sets)
         if self._on_selection_changed:
-            self._on_selection_changed(self._get_checked_item_ids())
+            self._on_selection_changed(checked_ids)
 
     def expand_all_groups(self) -> None:
         """Expand all groups in treeview."""
