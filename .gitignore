@@ -2,3 +2,9 @@ __pycache__/
 *.pyc
 logs/
 .env
+.cursor/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+_holding_cleanup_review/
