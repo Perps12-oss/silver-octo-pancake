@@ -47,6 +47,47 @@ def _fmt_bytes(n: int) -> str:
     return format_bytes(n, decimals=1)
 
 
+_IMAGE_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tif", ".tiff", ".webp", ".heic", ".heif",
+}
+_VIDEO_EXTENSIONS = {
+    ".mp4", ".mov", ".avi", ".mkv", ".wmv", ".webm", ".m4v", ".flv", ".mpeg", ".mpg",
+}
+_AUDIO_EXTENSIONS = {
+    ".mp3", ".wav", ".flac", ".aac", ".m4a", ".ogg", ".wma",
+}
+
+
+def _is_image_path(path: Path) -> bool:
+    return path.suffix.lower() in _IMAGE_EXTENSIONS
+
+
+def _mode_placeholder(mode: str, path: Path) -> str:
+    ext = path.suffix.lower()
+    if mode == "videos":
+        return "Video preview"
+    if mode == "music":
+        return "Audio file"
+    if mode == "empty_folders":
+        return "Empty folder"
+    if mode == "photos":
+        return "Image preview"
+    if ext in _VIDEO_EXTENSIONS:
+        return "Video file"
+    if ext in _AUDIO_EXTENSIONS:
+        return "Audio file"
+    if ext in _IMAGE_EXTENSIONS:
+        return "Image file"
+    return "File preview"
+
+
+def _should_decode_thumbnail(mode: str, path: Path) -> bool:
+    # Mode-aware behavior: real thumbnails for image-centric views only.
+    if mode in ("videos", "music", "empty_folders"):
+        return False
+    return _is_image_path(path)
+
+
 class _Card(CTkFrame):
     THUMB_W = 96
     THUMB_H = 96
@@ -112,8 +153,10 @@ class ThumbnailGrid(CTkFrame):
     def __init__(self, master=None, **kwargs):
         super().__init__(master, **kwargs)
         subscribe_to_theme(self, self._apply_theme)
+        self._current_mode: str = "files"
         self._groups: List[Any] = []
         self._cards: Dict[str, _Card] = {}
+        self._status_counts: Tuple[int, int] = (0, 0)
         self._on_selection_changed: Optional[Callable[[List[str]], None]] = None
         self._on_focus_changed: Optional[Callable[[str], None]] = None
         self._on_request_add_folder: Optional[Callable[[], None]] = None
@@ -137,7 +180,7 @@ class ThumbnailGrid(CTkFrame):
 
     def _build(self) -> None:
         self.configure(fg_color=theme_color("results.background"))
-        self._status = CTkLabel(self, text="No results — run a scan", font=Typography.FONT_SM, anchor="w")
+        self._status = CTkLabel(self, text=self._status_text(), font=Typography.FONT_SM, anchor="w")
         self._status.pack(fill="x", padx=Spacing.XS, pady=(Spacing.XS, 0))
         self._scroll = CTkScrollableFrame(self, fg_color=theme_color("results.background"))
         self._scroll.pack(fill="both", expand=True, padx=Spacing.XS, pady=Spacing.XS)
@@ -170,7 +213,8 @@ class ThumbnailGrid(CTkFrame):
         self.clear()
         self._groups = list(groups or [])
         total_files = sum(len(getattr(g, "files", []) or []) for g in self._groups)
-        self._status.configure(text=f"{len(self._groups)} groups, {total_files} files")
+        self._status_counts = (len(self._groups), total_files)
+        self._status.configure(text=self._status_text())
         if not self._groups:
             self._empty.pack(fill="both", expand=True)
             return
@@ -210,7 +254,8 @@ class ThumbnailGrid(CTkFrame):
             except tk.TclError as exc:
                 logger.debug("Failed to destroy old thumbnail widget: %s", exc)
         try:
-            self._status.configure(text="No results — run a scan")
+            self._status_counts = (0, 0)
+            self._status.configure(text=self._status_text())
         except (tk.TclError, AttributeError) as exc:
             logger.debug("Thumbnail status reset skipped: %s", exc)
         self._empty = CTkFrame(self._scroll, fg_color="transparent")
@@ -317,6 +362,28 @@ class ThumbnailGrid(CTkFrame):
     def on_request_start_search(self, callback: Callable[[], None]) -> None:
         self._on_request_start_search = callback
 
+    def set_mode(self, mode: str) -> None:
+        """Switch tile behavior between image thumbnails and mode-specific placeholders."""
+        self._current_mode = (mode or "files").strip() or "files"
+        try:
+            self._status.configure(text=self._status_text())
+        except (tk.TclError, AttributeError) as exc:
+            logger.debug("Thumbnail status mode update skipped: %s", exc)
+
+    def _mode_label(self) -> str:
+        try:
+            from cerebro.v2.ui.mode_tabs import ScanMode
+            return ScanMode.display_name(self._current_mode)
+        except (ImportError, AttributeError):
+            return (self._current_mode or "files").replace("_", " ").title()
+
+    def _status_text(self) -> str:
+        groups, files = self._status_counts
+        mode_label = self._mode_label()
+        if groups <= 0 and files <= 0:
+            return f"{mode_label}: No results - run a scan"
+        return f"{mode_label}: {groups} groups, {files} files"
+
     def _on_scroll_event(self, _event=None) -> None:
         if self._scroll_after_id:
             try:
@@ -351,16 +418,20 @@ class ThumbnailGrid(CTkFrame):
             logger.debug("Scroll idle prefetch skipped: %s", exc)
 
     def _request_thumbnail(self, item_id: str, file_obj: Any) -> None:
-        if not HAS_PIL:
-            card = self._cards.get(item_id)
-            if card:
-                card.set_placeholder("No PIL")
-            return
         path = Path(str(getattr(file_obj, "path", "")))
-        if not path.exists():
-            card = self._cards.get(item_id)
+        card = self._cards.get(item_id)
+        placeholder = _mode_placeholder(self._current_mode, path)
+        if not _should_decode_thumbnail(self._current_mode, path):
             if card:
-                card.set_placeholder("Missing")
+                card.set_placeholder(placeholder)
+            return
+        if not HAS_PIL:
+            if card:
+                card.set_placeholder(f"{placeholder}\n(install PIL)")
+            return
+        if not path.exists():
+            if card:
+                card.set_placeholder("Missing file")
             return
 
         cache_key = self._thumb_cache_key(path)
@@ -394,7 +465,7 @@ class ThumbnailGrid(CTkFrame):
         if card is None:
             return
         if pil_image is None:
-            card.set_placeholder("Preview N/A")
+            card.set_placeholder(_mode_placeholder(self._current_mode, Path(cache_key[0])))
             return
         if HAS_CTK_IMAGE:
             image_obj = ctk.CTkImage(light_image=pil_image, dark_image=pil_image, size=pil_image.size)

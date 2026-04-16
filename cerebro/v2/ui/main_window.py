@@ -91,6 +91,7 @@ class MainWindow(CTk, CTkMessageInterface):
         self._preview_collapsed: bool = False
         self._view_mode: str = "list"
         self._thumbnail_grid_dirty: bool = True
+        self._last_layout_width: int = 0
         self._app_settings: Settings = Settings.load(get_settings_path())
 
         # Scan state
@@ -173,6 +174,7 @@ class MainWindow(CTk, CTkMessageInterface):
         # Post-build setup
         self.after(100, self._restore_window_state)  # restore after layout settles
         self.after(200, self._setup_drag_drop)        # DnD after window is mapped
+        self.after(260, lambda: self._apply_master_detail_proportions(force=True))
 
     def _build_toolbar(self) -> None:
         """Build and install toolbar."""
@@ -263,6 +265,7 @@ class MainWindow(CTk, CTkMessageInterface):
         self._results_panel = ResultsPanel(self._center_panel_frame)
         self._results_panel.pack(fill="both", expand=True)
         self._thumbnail_grid = ThumbnailGrid(self._center_panel_frame)
+        self._thumbnail_grid.set_mode(self._current_scan_mode)
 
         # Wire folder panel callbacks
         self._folder_panel.on_folders_changed(self._on_folders_changed)
@@ -422,15 +425,7 @@ class MainWindow(CTk, CTkMessageInterface):
 
     def _on_folder_panel_collapse(self, collapsed: bool) -> None:
         """Resize paned window sash when left panel collapses/expands."""
-        try:
-            if collapsed:
-                self._horizontal_paned.sash_place(
-                    0, self._folder_panel.COLLAPSED_WIDTH, 0)
-            else:
-                self._horizontal_paned.sash_place(
-                    0, Dimensions.LEFT_PANEL_DEFAULT_WIDTH, 0)
-        except (tk.TclError, AttributeError, RuntimeError) as exc:
-            logger.debug("Sash placement skipped: %s", exc)
+        self._apply_master_detail_proportions(force=True)
 
     def _on_folders_changed(self, folders: List[Path]) -> None:
         """Handle folder list changes."""
@@ -591,6 +586,7 @@ class MainWindow(CTk, CTkMessageInterface):
         # Pass core DuplicateGroup objects directly — results_panel uses DuplicateFile attributes.
         # For large_files mode, provide total scanned bytes so the panel can show % of disk.
         from cerebro.v2.ui.mode_tabs import ScanMode
+        self._thumbnail_grid.set_mode(self._current_scan_mode)
         if self._current_scan_mode == ScanMode.LARGE_FILES:
             total_bytes = sum(
                 f.size for g in self._scan_results for f in g.files
@@ -634,6 +630,7 @@ class MainWindow(CTk, CTkMessageInterface):
                 self._preview_panel.set_layout_mode("compact")
             except (tk.TclError, AttributeError) as exc:
                 logger.debug("Failed to switch preview to compact layout: %s", exc)
+        self._apply_master_detail_proportions(force=True)
 
     def _hydrate_thumbnail_grid_if_needed(self) -> None:
         """Lazily load scan results into thumbnail grid when required."""
@@ -741,6 +738,7 @@ class MainWindow(CTk, CTkMessageInterface):
             self._results_panel.clear()
         if hasattr(self, '_thumbnail_grid') and self._thumbnail_grid:
             try:
+                self._thumbnail_grid.set_mode(new_mode)
                 self._thumbnail_grid.clear()
             except (tk.TclError, RuntimeError, AttributeError) as exc:
                 logger.debug("Failed clearing thumbnail grid on mode switch: %s", exc)
@@ -779,6 +777,7 @@ class MainWindow(CTk, CTkMessageInterface):
         else:
             if hasattr(self._results_panel, "_ffmpeg_banner"):
                 self._results_panel.show_ffmpeg_warning(False)
+        self._apply_master_detail_proportions(force=True)
 
     def _on_auto_mark_default(self) -> None:
         """Apply saved default auto-mark rule (banner / settings)."""
@@ -1038,7 +1037,50 @@ class MainWindow(CTk, CTkMessageInterface):
 
     def _on_configure(self, event) -> None:
         """Handle window resize."""
-        pass
+        if event.widget is not self:
+            return
+        width = int(getattr(event, "width", 0) or 0)
+        if width <= 0:
+            return
+        # Re-apply split ratios only on meaningful width changes.
+        if abs(width - self._last_layout_width) < 120:
+            return
+        self._last_layout_width = width
+        self.after(0, self._apply_master_detail_proportions)
+
+    def _target_left_panel_width(self) -> int:
+        if not hasattr(self, "_folder_panel") or not hasattr(self, "_horizontal_paned"):
+            return Dimensions.LEFT_PANEL_DEFAULT_WIDTH
+        try:
+            if self._folder_panel.is_collapsed():
+                return self._folder_panel.COLLAPSED_WIDTH
+        except (AttributeError, tk.TclError):
+            return Dimensions.LEFT_PANEL_DEFAULT_WIDTH
+
+        total_w = int(self._horizontal_paned.winfo_width() or 0)
+        if total_w <= 0:
+            total_w = int(self.winfo_width() or 0)
+        if total_w <= 0:
+            return Dimensions.LEFT_PANEL_DEFAULT_WIDTH
+
+        ratio_target = int(total_w * 0.24)
+        ratio_target = max(Dimensions.LEFT_PANEL_MIN_WIDTH, ratio_target)
+        ratio_target = min(Dimensions.LEFT_PANEL_MAX_WIDTH, ratio_target)
+
+        # Keep detail pane readable in both list and grid review modes.
+        min_center = 560 if self._view_mode == "grid" else 460
+        max_left = max(Dimensions.LEFT_PANEL_MIN_WIDTH, total_w - min_center)
+        return max(Dimensions.LEFT_PANEL_MIN_WIDTH, min(ratio_target, max_left))
+
+    def _apply_master_detail_proportions(self, *, force: bool = False) -> None:
+        """Maintain an Ashisoft-like master/detail split."""
+        try:
+            target = self._target_left_panel_width()
+            current = int(self._horizontal_paned.sash_coord(0)[0])
+            if force or abs(current - target) >= 8:
+                self._horizontal_paned.sash_place(0, target, 0)
+        except (tk.TclError, AttributeError, RuntimeError, ValueError) as exc:
+            logger.debug("Master/detail split update skipped: %s", exc)
 
     def _on_space_toggle(self, event) -> None:
         """Space bar: toggle the checkbox on the currently focused treeview row."""
@@ -1121,8 +1163,10 @@ class MainWindow(CTk, CTkMessageInterface):
                 try:
                     self._mode_tabs.set_mode(mode)
                     self._current_scan_mode = mode
+                    self._thumbnail_grid.set_mode(mode)
                 except (ValueError, tk.TclError, AttributeError) as exc:
                     logger.debug("Saved mode restore skipped: %s", exc)
+            self.after(0, lambda: self._apply_master_detail_proportions(force=True))
         except (OSError, ValueError, TypeError, tk.TclError) as exc:
             logger.warning("Failed to restore window state: %s", exc)
 

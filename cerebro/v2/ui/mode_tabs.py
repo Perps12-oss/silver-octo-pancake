@@ -4,8 +4,9 @@ Mode Tabs Widget
 Custom tab row matching Ashisoft's style:
   [📄 Files] [🖼 Photos] [🎬 Videos] [🎵 Music] [📁 Empty Folders] [📊 Large Files]
 
-Tabs are left-aligned, compact width (not stretched), and each has an icon + label.
-The active tab has an accent-coloured 3 px bottom border and a slightly elevated background.
+Tabs share one flat strip (`tabs.background`). The selected mode is shown with accent
+text plus a 3 px bottom border (`tabs.activeBorder`); inactive tabs use `tabs.foreground`.
+Hover uses `tabs.hoverBackground` without a second “filled button” look.
 """
 
 from __future__ import annotations
@@ -77,12 +78,12 @@ class _Tab(tk.Frame):
         self._on_click = on_click
         self._active = False
 
-        # Content label (icon + text in one label for simplicity)
+        # Slightly tighter padding + smaller font so six modes fit on typical widths.
         self._lbl = tk.Label(
             self,
             text=f"{icon}  {label}",
-            font=Typography.FONT_MD,
-            padx=Spacing.MD,
+            font=Typography.FONT_SM,
+            padx=Spacing.SM,
             pady=Spacing.SM,
             cursor="hand2",
         )
@@ -92,8 +93,7 @@ class _Tab(tk.Frame):
         self._indicator = tk.Frame(self, height=self.INDICATOR_H)
         self._indicator.pack(side="bottom", fill="x")
 
-        # Bind clicks on both frame and label
-        for widget in (self, self._lbl):
+        for widget in (self, self._lbl, self._indicator):
             widget.bind("<Button-1>", self._handle_click)
             widget.bind("<Enter>",    self._on_enter)
             widget.bind("<Leave>",    self._on_leave)
@@ -103,31 +103,38 @@ class _Tab(tk.Frame):
     def _handle_click(self, _event=None) -> None:
         self._on_click(self._mode_key)
 
+    def _strip_bg(self) -> str:
+        return theme_color("tabs.background")
+
     def _on_enter(self, _event=None) -> None:
         if not self._active:
-            hbg = theme_color("tabs.inactiveBackgroundHover")
-            fg = theme_color("tabs.inactiveForeground")
+            hbg = theme_color("tabs.hoverBackground")
+            fg = theme_color("tabs.foreground")
             self.configure(bg=hbg)
             self._lbl.configure(bg=hbg, fg=fg)
+            self._indicator.configure(bg=hbg)
 
     def _on_leave(self, _event=None) -> None:
         if not self._active:
-            bg = theme_color("tabs.inactiveBackground")
-            fg = theme_color("tabs.inactiveForeground")
+            bg = self._strip_bg()
+            fg = theme_color("tabs.foreground")
             self.configure(bg=bg)
             self._lbl.configure(bg=bg, fg=fg)
+            self._indicator.configure(bg=bg)
 
     def set_active(self, active: bool) -> None:
         self._active = active
+        strip = self._strip_bg()
+        accent = theme_color("tabs.activeBorder")
         if active:
-            bg        = theme_color("tabs.activeBackground")
-            fg        = theme_color("tabs.activeForeground")
-            ind_color = theme_color("tabs.activeBorder")
+            # One flat strip: no solid accent fill (avoids “patchwork” bar).
+            bg = strip
+            fg = accent
+            ind_color = accent
         else:
-            bg        = theme_color("tabs.inactiveBackground")
-            fg        = theme_color("tabs.inactiveForeground")
-            # Hide underline on inactive tabs (match bar background)
-            ind_color = theme_color("tabs.background")
+            bg = strip
+            fg = theme_color("tabs.foreground")
+            ind_color = strip
 
         self.configure(bg=bg)
         self._lbl.configure(bg=bg, fg=fg)
@@ -141,8 +148,7 @@ class ModeTabs(CTkFrame):
     """
     Scan mode tab row.
 
-    Tabs are left-aligned, compact, each with an icon + label.
-    The active tab has an accent bottom border.
+    Tabs are left-aligned on one background; selection is underline + accent label.
 
     Public API (unchanged from previous CTkSegmentedButton version):
         set_mode(mode: str)
@@ -182,7 +188,7 @@ class ModeTabs(CTkFrame):
                 icon=meta["icon"],
                 label=meta["label"],
                 on_click=self._on_tab_clicked,
-                bg=theme_color("tabs.inactiveBackground"),
+                bg=theme_color("tabs.background"),
             )
             tab.pack(side="left", fill="y")
             self._tabs[meta["key"]] = tab

@@ -459,6 +459,9 @@ class ResultsPanel(CTkFrame):
         self._empty_label: Optional[CTkLabel] = None
         self._status_frame: Optional[CTkFrame] = None
         self._results_count_label: Optional[CTkLabel] = None
+        self._mode_view_label: Optional[CTkLabel] = None
+        self._selected_count_label: Optional[CTkLabel] = None
+        self._selected_size_label: Optional[CTkLabel] = None
 
         # Callbacks
         self._on_selection_changed: Optional[Callable[[List[str]], None]] = None
@@ -545,23 +548,54 @@ class ResultsPanel(CTkFrame):
             self._status_frame.configure(fg_color=theme_color("base.backgroundTertiary"))
         if self._results_count_label:
             self._results_count_label.configure(text_color=theme_color("results.foreground"))
+        if self._mode_view_label:
+            self._mode_view_label.configure(text_color=theme_color("base.foregroundSecondary"))
+        for lbl in (self._selected_count_label, self._selected_size_label):
+            if lbl:
+                lbl.configure(text_color=theme_color("base.foregroundSecondary"))
 
     def _build_status_bar(self) -> None:
-        """Build results count status bar."""
+        """Build review summary strip (counts, mode/view, and selection stats)."""
         self._status_frame = CTkFrame(
             self,
-            height=28,
+            height=32,
             fg_color=theme_color("base.backgroundTertiary")
         )
         self._status_frame.pack(fill="x", padx=Spacing.XS, pady=(0, Spacing.XS))
 
+        left = CTkFrame(self._status_frame, fg_color="transparent")
+        left.pack(side="left", fill="x", expand=True, padx=Spacing.MD)
         self._results_count_label = CTkLabel(
-            self._status_frame,
+            left,
             text="0 groups, 0 files",
             font=Typography.FONT_SM,
             text_color=theme_color("results.foreground")
         )
-        self._results_count_label.pack(side="left", padx=Spacing.MD)
+        self._results_count_label.pack(side="left")
+        self._mode_view_label = CTkLabel(
+            left,
+            text="Files • List",
+            font=Typography.FONT_XS,
+            text_color=theme_color("base.foregroundSecondary"),
+        )
+        self._mode_view_label.pack(side="left", padx=(Spacing.SM, 0))
+
+        right = CTkFrame(self._status_frame, fg_color="transparent")
+        right.pack(side="right", padx=Spacing.MD)
+        self._selected_count_label = CTkLabel(
+            right,
+            text="Selected: 0",
+            font=Typography.FONT_XS,
+            text_color=theme_color("base.foregroundSecondary"),
+        )
+        self._selected_count_label.pack(side="left", padx=(0, Spacing.SM))
+        self._selected_size_label = CTkLabel(
+            right,
+            text="Marked size: 0 B",
+            font=Typography.FONT_XS,
+            text_color=theme_color("base.foregroundSecondary"),
+        )
+        self._selected_size_label.pack(side="left")
 
     def _configure_columns(self) -> None:
         """Configure treeview columns."""
@@ -708,14 +742,11 @@ class ResultsPanel(CTkFrame):
             self._current_filter = filter_key
             self._apply_filter()
 
-    def _on_check_changed(self, item_id: str, checked: bool) -> None:
+    def _on_check_changed(self, _item_id: str, _checked: bool) -> None:
         """Handle checkbox state change."""
         if self._syncing_checks:
             return
-        if checked:
-            self._selected_count += 1
-        else:
-            self._selected_count = max(0, self._selected_count - 1)
+        self._selected_count = len(self._treeview.get_checked())
 
         if (
             self._results_view_mode == "grid"
@@ -723,6 +754,7 @@ class ResultsPanel(CTkFrame):
             and getattr(self._thumbnail_grid, "_cards", None)
         ):
             self._sync_thumbnail_checks_from_tree()
+        self._update_status()
         # Notify callback
         if self._on_selection_changed:
             self._on_selection_changed(self._get_checked_item_ids())
@@ -1120,11 +1152,26 @@ class ResultsPanel(CTkFrame):
             self._on_request_start_search()
 
     def _update_status(self) -> None:
-        """Update results count label."""
+        """Update review summary strip labels."""
+        from cerebro.v2.ui.mode_tabs import ScanMode
+
         total_files = sum(g.file_count for g in self._filtered_groups)
         self._results_count_label.configure(
             text=f"{len(self._filtered_groups)} groups, {total_files} files"
         )
+        view_label = "Grid" if self._results_view_mode == "grid" else "List"
+        self._mode_view_label.configure(
+            text=f"{ScanMode.display_name(self._current_mode)} • {view_label}"
+        )
+        checked_ids = set(self._get_checked_item_ids())
+        marked_size = 0
+        for g in self._filtered_groups:
+            for i, fd in enumerate(g.files):
+                if f"{g.group_id}_{i}" in checked_ids:
+                    marked_size += self._fd_size(fd)
+        self._selected_count = len(checked_ids)
+        self._selected_count_label.configure(text=f"Selected: {self._selected_count}")
+        self._selected_size_label.configure(text=f"Marked size: {format_bytes(marked_size)}")
 
     def _format_date(self, timestamp: float) -> str:
         """Format timestamp to readable date."""
@@ -1297,13 +1344,18 @@ class ResultsPanel(CTkFrame):
     def set_results_view_mode(self, mode: str) -> None:
         """Whether the user is viewing list (tree) or grid thumbnails."""
         self._results_view_mode = mode if mode in ("list", "grid") else "list"
+        self._update_status()
 
     def on_file_row_focus(self, callback: Callable[[str], None]) -> None:
         """Callback when a list row is activated for preview (separate from checkbox)."""
         self._on_file_row_focus = callback
 
     def _get_checked_item_ids(self) -> List[str]:
-        if self._results_view_mode == "grid" and self._thumbnail_grid is not None:
+        if (
+            self._results_view_mode == "grid"
+            and self._thumbnail_grid is not None
+            and getattr(self._thumbnail_grid, "_cards", None)
+        ):
             return self._thumbnail_grid.get_checked()
         return self._treeview.get_checked()
 
@@ -1333,6 +1385,7 @@ class ResultsPanel(CTkFrame):
             self._selected_count = len(self._treeview.get_checked())
         finally:
             self._syncing_checks = False
+        self._update_status()
 
     def get_selected_files(self) -> List[Dict[str, Any]]:
         """
@@ -1509,6 +1562,8 @@ class ResultsPanel(CTkFrame):
             self._treeview.invert_checks()
             self._selected_count = self._total_items - self._selected_count
 
+        self._selected_count = len(self._treeview.get_checked())
+        self._update_status()
         self._sync_thumbnail_checks_from_tree()
         # Notify callback
         if self._on_selection_changed:
@@ -1541,6 +1596,7 @@ class ResultsPanel(CTkFrame):
             return
         self._current_mode = mode
         self._configure_columns_for_mode(mode)
+        self._update_status()
 
     def show_ffmpeg_warning(self, visible: bool) -> None:
         """Show or hide the FFmpeg-missing warning banner."""
