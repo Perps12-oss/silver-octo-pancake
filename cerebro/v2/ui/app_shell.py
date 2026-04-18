@@ -29,10 +29,11 @@ from cerebro.v2.ui.tab_bar         import TabBar
 from cerebro.v2.ui.welcome_page    import WelcomePage
 from cerebro.v2.ui.scan_page       import ScanPage
 from cerebro.v2.ui.results_page    import ResultsPage
-from cerebro.v2.ui.review_page     import ReviewPage
-from cerebro.v2.ui.history_page    import HistoryPage
+from cerebro.v2.ui.review_page      import ReviewPage
+from cerebro.v2.ui.history_page     import HistoryPage
 from cerebro.v2.ui.diagnostics_page import DiagnosticsPage
-from cerebro.engines.orchestrator  import ScanOrchestrator
+from cerebro.v2.ui.theme_applicator import ThemeApplicator
+from cerebro.engines.orchestrator   import ScanOrchestrator
 
 _PAGE_BG = "#F0F0F0"
 
@@ -127,6 +128,16 @@ class AppShell(CTk):
         self._current_page: str = "welcome"
         self._pages["welcome"].place(relwidth=1, relheight=1)
 
+        # Wire ThemeApplicator and apply initial theme
+        ta = ThemeApplicator.get()
+        initial_theme = "Cerebro Dark"
+        try:
+            from cerebro.core.theme_engine_v3 import ThemeEngineV3
+            initial_theme = ThemeEngineV3.get().active_theme_name or "Cerebro Dark"
+        except Exception:
+            pass
+        ta.apply(initial_theme, self)
+
     def _make_placeholder(self, key: str) -> CTkFrame:
         """Muted label placeholder shown until a later phase provides real content."""
         frame = CTkFrame(self._page_container, fg_color=_PAGE_BG)
@@ -172,69 +183,16 @@ class AppShell(CTk):
         if hasattr(self, "_themes_win") and self._themes_win.winfo_exists():
             self._themes_win.lift()
             return
-        self._themes_win = self._build_themes_window()
-
-    def _build_themes_window(self) -> tk.Toplevel:
-        win = tk.Toplevel(self)
-        win.title("Themes")
-        win.geometry("420x520")
-        win.configure(bg="#0B1929")
-        win.transient(self)
-        win.grab_set()
-
-        tk.Label(win, text="Choose Theme", bg="#0B1929", fg="#FFFFFF",
-                 font=("Segoe UI", 14, "bold")).pack(pady=14)
-        tk.Frame(win, bg="#2A4060", height=1).pack(fill="x", padx=16)
-
         try:
-            from cerebro.core.theme_engine_v3 import ThemeEngineV3
-            engine = ThemeEngineV3.get()
-            names = sorted(engine.all_theme_names())
-            active = engine.active_theme_name
-        except Exception:
-            engine, names, active = None, [], ""
+            chooser = _ThemeChooser(self, app_shell=self)
+            chooser.transient(self)
+            chooser.grab_set()
+            self._themes_win = chooser
+        except Exception as e:
+            print(f"Theme chooser error: {e}")
 
-        frame = tk.Frame(win, bg="#0B1929")
-        frame.pack(fill="both", expand=True, padx=16, pady=10)
-        sb = tk.Scrollbar(frame, orient="vertical")
-        lb = tk.Listbox(
-            frame, yscrollcommand=sb.set, selectmode="browse",
-            bg="#152535", fg="#FFFFFF", font=("Segoe UI", 11),
-            selectbackground="#2E558E", activestyle="none",
-            relief="flat", bd=0, highlightthickness=0,
-        )
-        sb.configure(command=lb.yview)
-        sb.pack(side="right", fill="y")
-        lb.pack(fill="both", expand=True)
-        for name in names:
-            lb.insert("end", f"  {name}")
-        if active in names:
-            idx = names.index(active)
-            lb.selection_set(idx)
-            lb.see(idx)
-
-        tk.Frame(win, bg="#2A4060", height=1).pack(fill="x", padx=16)
-        btn_row = tk.Frame(win, bg="#0B1929")
-        btn_row.pack(fill="x", padx=16, pady=12)
-
-        def _apply():
-            sel = lb.curselection()
-            if not sel or engine is None:
-                return
-            try:
-                engine.set_theme(names[sel[0]])
-                from cerebro.v2.core.theme_bridge_v2 import set_ctk_appearance_mode
-                set_ctk_appearance_mode()
-            except Exception:
-                pass
-
-        tk.Button(btn_row, text="Apply", command=_apply,
-                  bg="#27AE60", fg="#FFFFFF", relief="flat", padx=18, pady=5,
-                  font=("Segoe UI", 10), cursor="hand2").pack(side="right", padx=(6, 0))
-        tk.Button(btn_row, text="Close", command=win.destroy,
-                  bg="#2A4060", fg="#FFFFFF", relief="flat", padx=18, pady=5,
-                  font=("Segoe UI", 10), cursor="hand2").pack(side="right")
-        return win
+    def switch_theme(self, theme_name: str) -> None:
+        ThemeApplicator.get().apply(theme_name, self)
 
     def _on_open_session(self, session) -> None:
         """Load a past session into the Results page and switch to it (Phase 4+)."""
@@ -300,3 +258,86 @@ def run_app() -> None:
     """Entry point for the overhauled CEREBRO app."""
     app = AppShell()
     app.run()
+
+
+class _ThemeChooser(tk.Toplevel):
+    """Scrollable swatch grid for picking a theme."""
+
+    def __init__(self, master, app_shell, **kw) -> None:
+        super().__init__(master, **kw)
+        self._app = app_shell
+        self.title("Choose Theme")
+        self.geometry("420x520")
+        self.resizable(False, True)
+        self._build()
+
+    def _build(self) -> None:
+        from cerebro.core.theme_engine_v3 import ThemeEngineV3
+        engine = ThemeEngineV3.get()
+        names  = engine.all_theme_names()
+        active = engine.active_theme_name
+
+        canvas = tk.Canvas(self, highlightthickness=0)
+        vsb    = tk.Scrollbar(self, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        canvas.pack(fill="both", expand=True)
+
+        inner = tk.Frame(canvas)
+        win   = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def _resize(e): canvas.itemconfig(win, width=e.width)
+        def _cfg(_e):   canvas.configure(scrollregion=canvas.bbox("all"))
+        inner.bind("<Configure>", _cfg)
+        canvas.bind("<Configure>", _resize)
+        canvas.bind("<MouseWheel>",
+                    lambda e: canvas.yview_scroll(-1*(e.delta//120), "units"))
+
+        COLS = 3
+        for idx, name in enumerate(names):
+            row, col = divmod(idx, COLS)
+            self._make_card(inner, engine, name, active).grid(
+                row=row, column=col, padx=6, pady=6)
+
+    def _make_card(self, parent, engine, name: str, active: str) -> tk.Frame:
+        was = engine.active_theme_name
+        engine.set_theme(name)
+        title_bg = engine.get_color("shell.titleBarBackground", "#111111")
+        acc1     = engine.get_color("shell.accentPrimary",      "#22D3EE")
+        acc2     = engine.get_color("shell.accentSecondary",    "#06B6D4")
+        danger   = engine.get_color("shell.accentDanger",       "#F85149")
+        base_bg  = engine.get_color("base.background",          "#1E1E1E")
+        base_fg  = engine.get_color("base.foreground",          "#E6EDF3")
+        border_c = acc1 if name == active else engine.get_color("base.border", "#30363D")
+        bd       = 2   if name == active else 1
+        engine.set_theme(was)
+
+        card = tk.Frame(parent, width=120, height=80, bg=base_bg,
+                        highlightbackground=border_c, highlightthickness=bd,
+                        cursor="hand2")
+        card.pack_propagate(False)
+
+        # Top area with title bg + 3 dots
+        top = tk.Frame(card, bg=title_bg, height=50)
+        top.pack(fill="x")
+        top.pack_propagate(False)
+        dot_row = tk.Frame(top, bg=title_bg)
+        dot_row.place(relx=0.5, rely=0.55, anchor="center")
+        for color in (acc1, acc2, danger):
+            c = tk.Canvas(dot_row, width=10, height=10,
+                          bg=title_bg, highlightthickness=0)
+            c.pack(side="left", padx=2)
+            c.create_oval(1, 1, 9, 9, fill=color, outline="")
+
+        # Bottom label
+        lbl = tk.Label(card, text=name, bg=base_bg, fg=base_fg,
+                       font=("Segoe UI", 9), wraplength=110, justify="center")
+        lbl.pack(expand=True)
+
+        for w in (card, top, dot_row, lbl):
+            w.bind("<Button-1>", lambda _e, n=name: self._pick(n))
+        return card
+
+    def _pick(self, name: str) -> None:
+        self._app.switch_theme(name)
+        self.destroy()
