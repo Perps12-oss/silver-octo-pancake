@@ -1,5 +1,17 @@
 """
-Main Window
+LEGACY UI — MainWindow (Ashisoft edition).
+
+Retained for reference only. The canonical UI is AppShell.
+This module is NOT imported during normal app launch.
+
+Launch with:  python -m cerebro.v2
+Entry point:  cerebro/v2/ui/app_shell.py → AppShell
+
+Engine wiring reference: _handle_progress_on_main(), _on_scan_complete()
+Thread marshal pattern:  self.after(0, lambda: ...) — see those methods.
+
+---
+Original module description:
 
 Root CTk() window with complete Ashisoft-style single-window layout.
 Handles window lifecycle, panel organization, and keyboard shortcuts.
