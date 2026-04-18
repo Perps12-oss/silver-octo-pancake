@@ -158,14 +158,83 @@ class AppShell(CTk):
         self._tab_bar.switch_to(key)
 
     # ------------------------------------------------------------------
-    # Title bar actions (stubbed — wired in Phase 7)
+    # Title bar actions
     # ------------------------------------------------------------------
 
     def _open_settings(self) -> None:
-        pass  # Phase 7
+        if hasattr(self, "_settings_win") and self._settings_win.winfo_exists():
+            self._settings_win.lift()
+            return
+        from cerebro.v2.ui.settings_dialog import SettingsDialog, Settings, get_settings_path
+        self._settings_win = SettingsDialog(self, Settings.load(get_settings_path()))
 
     def _open_themes(self) -> None:
-        pass  # Phase 7
+        if hasattr(self, "_themes_win") and self._themes_win.winfo_exists():
+            self._themes_win.lift()
+            return
+        self._themes_win = self._build_themes_window()
+
+    def _build_themes_window(self) -> tk.Toplevel:
+        win = tk.Toplevel(self)
+        win.title("Themes")
+        win.geometry("420x520")
+        win.configure(bg="#0B1929")
+        win.transient(self)
+        win.grab_set()
+
+        tk.Label(win, text="Choose Theme", bg="#0B1929", fg="#FFFFFF",
+                 font=("Segoe UI", 14, "bold")).pack(pady=14)
+        tk.Frame(win, bg="#2A4060", height=1).pack(fill="x", padx=16)
+
+        try:
+            from cerebro.core.theme_engine_v3 import ThemeEngineV3
+            engine = ThemeEngineV3.get()
+            names = sorted(engine.all_theme_names())
+            active = engine.active_theme_name
+        except Exception:
+            engine, names, active = None, [], ""
+
+        frame = tk.Frame(win, bg="#0B1929")
+        frame.pack(fill="both", expand=True, padx=16, pady=10)
+        sb = tk.Scrollbar(frame, orient="vertical")
+        lb = tk.Listbox(
+            frame, yscrollcommand=sb.set, selectmode="browse",
+            bg="#152535", fg="#FFFFFF", font=("Segoe UI", 11),
+            selectbackground="#2E558E", activestyle="none",
+            relief="flat", bd=0, highlightthickness=0,
+        )
+        sb.configure(command=lb.yview)
+        sb.pack(side="right", fill="y")
+        lb.pack(fill="both", expand=True)
+        for name in names:
+            lb.insert("end", f"  {name}")
+        if active in names:
+            idx = names.index(active)
+            lb.selection_set(idx)
+            lb.see(idx)
+
+        tk.Frame(win, bg="#2A4060", height=1).pack(fill="x", padx=16)
+        btn_row = tk.Frame(win, bg="#0B1929")
+        btn_row.pack(fill="x", padx=16, pady=12)
+
+        def _apply():
+            sel = lb.curselection()
+            if not sel or engine is None:
+                return
+            try:
+                engine.set_theme(names[sel[0]])
+                from cerebro.v2.core.theme_bridge_v2 import set_ctk_appearance_mode
+                set_ctk_appearance_mode()
+            except Exception:
+                pass
+
+        tk.Button(btn_row, text="Apply", command=_apply,
+                  bg="#27AE60", fg="#FFFFFF", relief="flat", padx=18, pady=5,
+                  font=("Segoe UI", 10), cursor="hand2").pack(side="right", padx=(6, 0))
+        tk.Button(btn_row, text="Close", command=win.destroy,
+                  bg="#2A4060", fg="#FFFFFF", relief="flat", padx=18, pady=5,
+                  font=("Segoe UI", 10), cursor="hand2").pack(side="right")
+        return win
 
     def _on_open_session(self, session) -> None:
         """Load a past session into the Results page and switch to it (Phase 4+)."""
