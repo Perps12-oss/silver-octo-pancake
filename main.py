@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 
-from cerebro.v2.ui.main_window import run_app
+from cerebro.v2.ui.app_shell import run_app
 
 
 def _validate_environment() -> None:

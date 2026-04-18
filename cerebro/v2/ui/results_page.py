@@ -475,12 +475,21 @@ class _ActionToolbar(tk.Frame):
         inner.pack(fill="both", expand=True, padx=8)
 
         def _btn(text, cmd, **extra):
-            b = tk.Button(inner, text=text, command=cmd,
-                          bg=_WHITE, fg="#333333",
-                          font=("Segoe UI", 10), relief="flat",
-                          cursor="hand2", padx=10, pady=4,
-                          highlightbackground=_BTN_BD, highlightthickness=1,
-                          **extra)
+            opts: dict = {
+                "text": text,
+                "command": cmd,
+                "bg": _WHITE,
+                "fg": "#333333",
+                "font": ("Segoe UI", 10),
+                "relief": "flat",
+                "cursor": "hand2",
+                "padx": 10,
+                "pady": 4,
+                "highlightbackground": _BTN_BD,
+                "highlightthickness": 1,
+            }
+            opts.update(extra)
+            b = tk.Button(inner, **opts)
             b.pack(side="left", padx=3)
             b.bind("<Enter>", lambda _e: b.configure(bg=_SURFACE))
             b.bind("<Leave>", lambda _e: b.configure(bg=_WHITE))

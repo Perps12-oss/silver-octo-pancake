@@ -57,7 +57,9 @@ _SCAN_MODES: List[Dict[str, str]] = [
     {"key": "large_files",   "icon": "📊", "label": "Unique"},
 ]
 
-_DUMMY_CHILD = "__dummy__"
+# ttk.Treeview requires globally-unique item ids. Never reuse the same iid under
+# multiple parents — use tags to identify placeholder rows instead.
+_DUMMY_TAG = "__tree_dummy__"
 
 
 # ===========================================================================
@@ -140,15 +142,26 @@ class _FolderTree(tk.Frame):
         for label, path in nodes:
             item = self._tree.insert("", "end", text=label,
                                      values=[str(path)])
-            self._tree.insert(item, "end", _DUMMY_CHILD, text="Loading…")
+            self._add_dummy_child(item, text="Loading…")
+
+    def _dummy_tags(self) -> tuple[str, ...]:
+        return (_DUMMY_TAG,)
+
+    def _is_dummy_item(self, iid: str) -> bool:
+        tags = self._tree.item(iid, "tags") or ()
+        return _DUMMY_TAG in tags
+
+    def _add_dummy_child(self, parent: str, *, text: str) -> None:
+        """Insert a unique placeholder child so the row shows an expand arrow."""
+        self._tree.insert(parent, "end", text=text, tags=self._dummy_tags())
 
     def _on_open(self, _event=None) -> None:
         item = self._tree.focus()
         children = self._tree.get_children(item)
-        if len(children) == 1 and children[0] == _DUMMY_CHILD:
+        if len(children) == 1 and self._is_dummy_item(children[0]):
             path_str = self._tree.item(item, "values")
             if path_str:
-                self._tree.delete(_DUMMY_CHILD)
+                self._tree.delete(children[0])
                 threading.Thread(
                     target=self._load_children,
                     args=(item, Path(path_str[0])),
@@ -170,7 +183,7 @@ class _FolderTree(tk.Frame):
             child = self._tree.insert(parent, "end", text=label,
                                       values=[str(path)])
             # Add dummy so it shows expand arrow
-            self._tree.insert(child, "end", _DUMMY_CHILD, text="")
+            self._add_dummy_child(child, text="")
 
     def _on_select(self, _event=None) -> None:
         item = self._tree.focus()
