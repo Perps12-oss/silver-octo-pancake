@@ -28,6 +28,7 @@ from cerebro.v2.ui.title_bar    import TitleBar
 from cerebro.v2.ui.tab_bar      import TabBar
 from cerebro.v2.ui.welcome_page import WelcomePage
 from cerebro.v2.ui.scan_page    import ScanPage
+from cerebro.v2.ui.results_page import ResultsPage
 from cerebro.engines.orchestrator import ScanOrchestrator
 
 _PAGE_BG = "#F0F0F0"
@@ -90,10 +91,16 @@ class AppShell(CTk):
         self._page_container = CTkFrame(self, fg_color=_PAGE_BG)
         self._page_container.pack(fill="both", expand=True)
 
-        # Build pages — Welcome is real; rest are placeholders for now
+        # Build pages — Welcome, Scan, Results are real; rest are placeholders
         self._pages: Dict[str, CTkFrame] = {}
-        for key in ("scan", "results", "review", "history", "diagnostics"):
+        for key in ("review", "history", "diagnostics"):
             self._pages[key] = self._make_placeholder(key)
+
+        self._results_page = ResultsPage(
+            self._page_container,
+            on_open_group=self._on_open_group,
+        )
+        self._pages["results"] = self._results_page
 
         self._pages["welcome"] = WelcomePage(
             self._page_container,
@@ -152,12 +159,24 @@ class AppShell(CTk):
         self.switch_tab("results")
 
     def _on_scan_complete(self, results: list) -> None:
-        """Called by ScanPage when a scan finishes. Wire Results page in Phase 4."""
+        """Called by ScanPage when a scan finishes."""
         self._scan_results = results
+        self._results_page.load_results(results)
         dup_count = sum(max(0, len(g.files) - 1) for g in results)
         self.set_results_badge(dup_count)
         self.enable_review_tab()
+        # Refresh welcome stats then switch to results
+        try:
+            self._pages["welcome"].refresh()
+        except (AttributeError, tk.TclError):
+            pass
         self.switch_tab("results")
+
+    def _on_open_group(self, group_id: int, groups: list) -> None:
+        """Called when user double-clicks a group in Results — opens Review tab (Phase 5)."""
+        self._active_group_id = group_id
+        self._active_groups   = groups
+        self.switch_tab("review")
 
     # ------------------------------------------------------------------
     # Public API for later phases
