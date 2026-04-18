@@ -3,7 +3,7 @@
   "author": "Cerebro Team",
   "version": "1.0.0",
   "type": "dark",
-  "description": "Warm dark theme inspired by Monokai Pro — orange accents on charcoal",
+  "description": "Warm dark theme inspired by Monokai Pro \u00e2\u20ac\u201d orange accents on charcoal",
   "colors": {
     "base.background": "#2D2A2E",
     "base.backgroundSecondary": "#232024",
@@ -88,6 +88,19 @@
     "tabs.inactiveBackground": "#2D2A2E",
     "tabs.inactiveForeground": "#939293",
     "tabs.inactiveBackgroundHover": "#38343A",
-    "tabs.activeBorder": "#FC9867"
+    "tabs.activeBorder": "#FC9867",
+    "shell.titleBarBackground": "#1E1C1F",
+    "shell.accentPrimary": "#FC9867",
+    "shell.accentSecondary": "#D68157",
+    "shell.accentDanger": "#FF6188",
+    "shell.accentSuccess": "#A9DC76",
+    "shell.navyBar": "#232024",
+    "shell.border": "#403D42",
+    "shell.rowAlt": "#232024",
+    "shell.rowSelected": "#5C3D2A",
+    "shell.rowSelectedText": "#FCFCFA",
+    "shell.treeSelected": "#38343A",
+    "shell.statDuplicates": "#FF6188",
+    "shell.statSpace": "#A9DC76"
   }
 }

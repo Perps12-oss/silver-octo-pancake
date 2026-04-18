@@ -235,6 +235,35 @@ _s("feedback.dangerBackground", "feedback", "Error background tint")
 _s("feedback.info",             "feedback", "Info text/icon (scan hint)")
 _s("feedback.infoBackground",   "feedback", "Info background tint")
 
+# ---- Shell — new top-level UI chrome (13 slots) ----
+
+_s("shell.titleBarBackground", "shell", "Title bar / traffic light strip background",
+   fallback="base.background", derive="darken:8")
+_s("shell.accentPrimary",      "shell", "Primary shell accent (active tab indicator, CTA button)",
+   fallback="base.accent")
+_s("shell.accentSecondary",    "shell", "Secondary shell accent",
+   fallback="base.accentHover")
+_s("shell.accentDanger",       "shell", "Danger / delete accent",
+   fallback="feedback.danger")
+_s("shell.accentSuccess",      "shell", "Success / reclaimed-space accent",
+   fallback="feedback.success")
+_s("shell.navyBar",            "shell", "Action-bar / nav-strip background",
+   fallback="base.backgroundSecondary")
+_s("shell.border",             "shell", "Shell chrome border",
+   fallback="base.border")
+_s("shell.rowAlt",             "shell", "Alternating grid row tint",
+   fallback="base.backgroundSecondary")
+_s("shell.rowSelected",        "shell", "Selected grid row fill",
+   fallback="base.accentMuted")
+_s("shell.rowSelectedText",    "shell", "Text on selected grid row",
+   fallback="base.foreground")
+_s("shell.treeSelected",       "shell", "Folder-tree selected row highlight",
+   fallback="base.backgroundTertiary")
+_s("shell.statDuplicates",     "shell", "Stat number color — duplicates count",
+   fallback="feedback.danger")
+_s("shell.statSpace",          "shell", "Stat number color — space recovered",
+   fallback="feedback.success")
+
 
 # =============================================================================
 # Slot Groups — convenient access by area
@@ -253,6 +282,7 @@ SLOT_GROUPS: Dict[str, List[str]] = {
     "input":      sorted(k for k, v in SLOT_REGISTRY.items() if v.group == "input"),
     "dialog":     sorted(k for k, v in SLOT_REGISTRY.items() if v.group == "dialog"),
     "feedback":   sorted(k for k, v in SLOT_REGISTRY.items() if v.group == "feedback"),
+    "shell":      sorted(k for k, v in SLOT_REGISTRY.items() if v.group == "shell"),
 }
 
 # =============================================================================

@@ -3,7 +3,7 @@
   "author": "Cerebro Team",
   "version": "1.0.0",
   "type": "dark",
-  "description": "Dark theme inspired by Dracula — purple accents on deep purple background",
+  "description": "Dark theme inspired by Dracula \u00e2\u20ac\u201d purple accents on deep purple background",
   "colors": {
     "base.background": "#282A36",
     "base.backgroundSecondary": "#21222C",
@@ -88,6 +88,19 @@
     "tabs.inactiveBackground": "#282A36",
     "tabs.inactiveForeground": "#6272A4",
     "tabs.inactiveBackgroundHover": "#343746",
-    "tabs.activeBorder": "#BD93F9"
+    "tabs.activeBorder": "#BD93F9",
+    "shell.titleBarBackground": "#1C1E29",
+    "shell.accentPrimary": "#BD93F9",
+    "shell.accentSecondary": "#A07CD3",
+    "shell.accentDanger": "#FF5555",
+    "shell.accentSuccess": "#50FA7B",
+    "shell.navyBar": "#21222C",
+    "shell.border": "#44475A",
+    "shell.rowAlt": "#21222C",
+    "shell.rowSelected": "#3D3070",
+    "shell.rowSelectedText": "#F8F8F2",
+    "shell.treeSelected": "#343746",
+    "shell.statDuplicates": "#FF5555",
+    "shell.statSpace": "#50FA7B"
   }
 }

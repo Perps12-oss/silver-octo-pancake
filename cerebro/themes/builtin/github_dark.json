@@ -3,7 +3,7 @@
   "author": "Cerebro Team",
   "version": "1.0.0",
   "type": "dark",
-  "description": "Dark theme inspired by GitHub's dark mode — blue accents on GitHub dark",
+  "description": "Dark theme inspired by GitHub's dark mode \u00e2\u20ac\u201d blue accents on GitHub dark",
   "colors": {
     "base.background": "#0D1117",
     "base.backgroundSecondary": "#010409",
@@ -88,6 +88,19 @@
     "tabs.inactiveBackground": "#0D1117",
     "tabs.inactiveForeground": "#8B949E",
     "tabs.inactiveBackgroundHover": "#161B22",
-    "tabs.activeBorder": "#58A6FF"
+    "tabs.activeBorder": "#58A6FF",
+    "shell.titleBarBackground": "#010409",
+    "shell.accentPrimary": "#58A6FF",
+    "shell.accentSecondary": "#4A8DD8",
+    "shell.accentDanger": "#F85149",
+    "shell.accentSuccess": "#3FB950",
+    "shell.navyBar": "#010409",
+    "shell.border": "#30363D",
+    "shell.rowAlt": "#010409",
+    "shell.rowSelected": "#1A3A5C",
+    "shell.rowSelectedText": "#E6EDF3",
+    "shell.treeSelected": "#161B22",
+    "shell.statDuplicates": "#F85149",
+    "shell.statSpace": "#3FB950"
   }
 }

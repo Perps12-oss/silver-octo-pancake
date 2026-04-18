@@ -3,7 +3,7 @@
   "author": "Cerebro Team",
   "version": "1.0.0",
   "type": "dark",
-  "description": "Dark theme inspired by Atom One Dark — blue accents on slate gray",
+  "description": "Dark theme inspired by Atom One Dark \u00e2\u20ac\u201d blue accents on slate gray",
   "colors": {
     "base.background": "#282C34",
     "base.backgroundSecondary": "#21252B",
@@ -88,6 +88,19 @@
     "tabs.inactiveBackground": "#282C34",
     "tabs.inactiveForeground": "#7F848E",
     "tabs.inactiveBackgroundHover": "#2C313A",
-    "tabs.activeBorder": "#61AFEF"
+    "tabs.activeBorder": "#61AFEF",
+    "shell.titleBarBackground": "#1C1F26",
+    "shell.accentPrimary": "#61AFEF",
+    "shell.accentSecondary": "#5294CB",
+    "shell.accentDanger": "#E06C75",
+    "shell.accentSuccess": "#98C379",
+    "shell.navyBar": "#21252B",
+    "shell.border": "#3E4451",
+    "shell.rowAlt": "#21252B",
+    "shell.rowSelected": "#264A6E",
+    "shell.rowSelectedText": "#ABB2BF",
+    "shell.treeSelected": "#2C313A",
+    "shell.statDuplicates": "#E06C75",
+    "shell.statSpace": "#98C379"
   }
 }

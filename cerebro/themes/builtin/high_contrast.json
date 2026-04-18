@@ -3,7 +3,7 @@
   "author": "Cerebro Team",
   "version": "1.0.0",
   "type": "dark",
-  "description": "Maximum-contrast accessibility theme — yellow accents on pure black for readability",
+  "description": "Maximum-contrast accessibility theme \u00e2\u20ac\u201d yellow accents on pure black for readability",
   "colors": {
     "base.background": "#000000",
     "base.backgroundSecondary": "#000000",
@@ -88,6 +88,19 @@
     "tabs.inactiveBackground": "#000000",
     "tabs.inactiveForeground": "#E0E0E0",
     "tabs.inactiveBackgroundHover": "#1A1A1A",
-    "tabs.activeBorder": "#FFD700"
+    "tabs.activeBorder": "#FFD700",
+    "shell.titleBarBackground": "#000000",
+    "shell.accentPrimary": "#FFD700",
+    "shell.accentSecondary": "#FFED4E",
+    "shell.accentDanger": "#FF4444",
+    "shell.accentSuccess": "#3FB950",
+    "shell.navyBar": "#000000",
+    "shell.border": "#FFD700",
+    "shell.rowAlt": "#0A0A0A",
+    "shell.rowSelected": "#4D4100",
+    "shell.rowSelectedText": "#FFFFFF",
+    "shell.treeSelected": "#1A1A1A",
+    "shell.statDuplicates": "#FF4444",
+    "shell.statSpace": "#3FB950"
   }
 }

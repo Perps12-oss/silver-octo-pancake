@@ -3,7 +3,7 @@
   "author": "Cerebro Team",
   "version": "1.0.0",
   "type": "light",
-  "description": "Clean light theme with teal accents — the Cerebro light counterpart",
+  "description": "Clean light theme with teal accents \u00e2\u20ac\u201d the Cerebro light counterpart",
   "colors": {
     "base.background": "#FFFFFF",
     "base.backgroundSecondary": "#F6F8FA",
@@ -88,6 +88,19 @@
     "tabs.inactiveBackground": "#FFFFFF",
     "tabs.inactiveForeground": "#656D76",
     "tabs.inactiveBackgroundHover": "#EBEEF1",
-    "tabs.activeBorder": "#0891B2"
+    "tabs.activeBorder": "#0891B2",
+    "shell.titleBarBackground": "#EDF1F5",
+    "shell.accentPrimary": "#0891B2",
+    "shell.accentSecondary": "#067B97",
+    "shell.accentDanger": "#CF222E",
+    "shell.accentSuccess": "#1A7F37",
+    "shell.navyBar": "#F6F8FA",
+    "shell.border": "#D0D7DE",
+    "shell.rowAlt": "#F6F8FA",
+    "shell.rowSelected": "#D0ECEC",
+    "shell.rowSelectedText": "#1F2328",
+    "shell.treeSelected": "#EBEEF1",
+    "shell.statDuplicates": "#CF222E",
+    "shell.statSpace": "#1A7F37"
   }
 }

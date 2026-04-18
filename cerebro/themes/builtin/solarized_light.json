@@ -3,7 +3,7 @@
   "author": "Cerebro Team",
   "version": "1.0.0",
   "type": "light",
-  "description": "Light theme inspired by Solarized — orange accents on warm cream",
+  "description": "Light theme inspired by Solarized \u00e2\u20ac\u201d orange accents on warm cream",
   "colors": {
     "base.background": "#FDF6E3",
     "base.backgroundSecondary": "#F5EED7",
@@ -88,6 +88,19 @@
     "tabs.inactiveBackground": "#FDF6E3",
     "tabs.inactiveForeground": "#586E75",
     "tabs.inactiveBackgroundHover": "#EEE8D5",
-    "tabs.activeBorder": "#CB4B16"
+    "tabs.activeBorder": "#CB4B16",
+    "shell.titleBarBackground": "#E8E1CC",
+    "shell.accentPrimary": "#CB4B16",
+    "shell.accentSecondary": "#AC3F12",
+    "shell.accentDanger": "#DC322F",
+    "shell.accentSuccess": "#859900",
+    "shell.navyBar": "#F5EED7",
+    "shell.border": "#D3CBB7",
+    "shell.rowAlt": "#F5EED7",
+    "shell.rowSelected": "#F5DDD0",
+    "shell.rowSelectedText": "#073642",
+    "shell.treeSelected": "#EEE8D5",
+    "shell.statDuplicates": "#DC322F",
+    "shell.statSpace": "#859900"
   }
 }

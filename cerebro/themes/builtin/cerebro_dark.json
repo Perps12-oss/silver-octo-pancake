@@ -3,7 +3,7 @@
   "author": "Cerebro Team",
   "version": "1.0.0",
   "type": "dark",
-  "description": "Default dark theme with cyan accents — the Cerebro signature look",
+  "description": "Default dark theme with cyan accents \u00e2\u20ac\u201d the Cerebro signature look",
   "colors": {
     "base.background": "#0A0E14",
     "base.backgroundSecondary": "#0D1117",
@@ -88,6 +88,19 @@
     "tabs.inactiveBackground": "#0A0E14",
     "tabs.inactiveForeground": "#8B949E",
     "tabs.inactiveBackgroundHover": "#161B22",
-    "tabs.activeBorder": "#22D3EE"
+    "tabs.activeBorder": "#22D3EE",
+    "shell.titleBarBackground": "#070B10",
+    "shell.accentPrimary": "#22D3EE",
+    "shell.accentSecondary": "#06B6D4",
+    "shell.accentDanger": "#F85149",
+    "shell.accentSuccess": "#3FB950",
+    "shell.navyBar": "#0D1117",
+    "shell.border": "#30363D",
+    "shell.rowAlt": "#0D1117",
+    "shell.rowSelected": "#164E63",
+    "shell.rowSelectedText": "#E6EDF3",
+    "shell.treeSelected": "#161B22",
+    "shell.statDuplicates": "#F85149",
+    "shell.statSpace": "#3FB950"
   }
 }

@@ -3,7 +3,7 @@
   "author": "Cerebro Team",
   "version": "1.0.0",
   "type": "dark",
-  "description": "Dark theme inspired by Tokyo Night — blue-purple accents on deep indigo",
+  "description": "Dark theme inspired by Tokyo Night \u00e2\u20ac\u201d blue-purple accents on deep indigo",
   "colors": {
     "base.background": "#1A1B26",
     "base.backgroundSecondary": "#16161E",
@@ -88,6 +88,19 @@
     "tabs.inactiveBackground": "#1A1B26",
     "tabs.inactiveForeground": "#565F89",
     "tabs.inactiveBackgroundHover": "#24283B",
-    "tabs.activeBorder": "#7AA2F7"
+    "tabs.activeBorder": "#7AA2F7",
+    "shell.titleBarBackground": "#11121A",
+    "shell.accentPrimary": "#7AA2F7",
+    "shell.accentSecondary": "#6789D1",
+    "shell.accentDanger": "#F85149",
+    "shell.accentSuccess": "#9ECE6A",
+    "shell.navyBar": "#16161E",
+    "shell.border": "#3B4261",
+    "shell.rowAlt": "#16161E",
+    "shell.rowSelected": "#2A3A6B",
+    "shell.rowSelectedText": "#C0CAF5",
+    "shell.treeSelected": "#24283B",
+    "shell.statDuplicates": "#F85149",
+    "shell.statSpace": "#9ECE6A"
   }
 }

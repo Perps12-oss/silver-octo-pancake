@@ -3,7 +3,7 @@
   "author": "Cerebro Team",
   "version": "1.0.0",
   "type": "dark",
-  "description": "Dark theme inspired by Nord — frost blue accents on arctic blue-gray",
+  "description": "Dark theme inspired by Nord \u00e2\u20ac\u201d frost blue accents on arctic blue-gray",
   "colors": {
     "base.background": "#2E3440",
     "base.backgroundSecondary": "#292E39",
@@ -88,6 +88,19 @@
     "tabs.inactiveBackground": "#2E3440",
     "tabs.inactiveForeground": "#D8DEE9",
     "tabs.inactiveBackgroundHover": "#3B4252",
-    "tabs.activeBorder": "#88C0D0"
+    "tabs.activeBorder": "#88C0D0",
+    "shell.titleBarBackground": "#242932",
+    "shell.accentPrimary": "#88C0D0",
+    "shell.accentSecondary": "#73A3B0",
+    "shell.accentDanger": "#BF616A",
+    "shell.accentSuccess": "#A3BE8C",
+    "shell.navyBar": "#292E39",
+    "shell.border": "#434C5E",
+    "shell.rowAlt": "#292E39",
+    "shell.rowSelected": "#2E4D5A",
+    "shell.rowSelectedText": "#ECEFF4",
+    "shell.treeSelected": "#3B4252",
+    "shell.statDuplicates": "#BF616A",
+    "shell.statSpace": "#A3BE8C"
   }
 }
