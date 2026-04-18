@@ -27,6 +27,7 @@ except ImportError:
 from cerebro.v2.ui.title_bar    import TitleBar
 from cerebro.v2.ui.tab_bar      import TabBar
 from cerebro.v2.ui.welcome_page import WelcomePage
+from cerebro.v2.ui.scan_page    import ScanPage
 from cerebro.engines.orchestrator import ScanOrchestrator
 
 _PAGE_BG = "#F0F0F0"
@@ -100,6 +101,12 @@ class AppShell(CTk):
             on_open_session=self._on_open_session,
         )
 
+        self._pages["scan"] = ScanPage(
+            self._page_container,
+            orchestrator=self._orchestrator,
+            on_scan_complete=self._on_scan_complete,
+        )
+
         # Show Welcome
         self._current_page: str = "welcome"
         self._pages["welcome"].place(relwidth=1, relheight=1)
@@ -142,6 +149,14 @@ class AppShell(CTk):
 
     def _on_open_session(self, session) -> None:
         """Load a past session into the Results page and switch to it (Phase 4+)."""
+        self.switch_tab("results")
+
+    def _on_scan_complete(self, results: list) -> None:
+        """Called by ScanPage when a scan finishes. Wire Results page in Phase 4."""
+        self._scan_results = results
+        dup_count = sum(max(0, len(g.files) - 1) for g in results)
+        self.set_results_badge(dup_count)
+        self.enable_review_tab()
         self.switch_tab("results")
 
     # ------------------------------------------------------------------
