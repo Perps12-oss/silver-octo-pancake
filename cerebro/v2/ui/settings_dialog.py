@@ -541,6 +541,49 @@ class SettingsDialog(CTkToplevel):
         cache_slider.configure(command=lambda v: self._cache_size_label.configure(text=str(int(v))))
         self._controls["performance.hash_cache_max_mb"] = cache_slider
 
+        # Clear cache button
+        clear_row = CTkFrame(tab, fg_color="transparent")
+        clear_row.pack(fill="x", padx=Spacing.SM, pady=(Spacing.XS, Spacing.SM))
+
+        CTkButton(
+            clear_row,
+            text="Clear Cache",
+            width=110,
+            height=28,
+            font=Typography.FONT_SM,
+            fg_color=theme_color("shell.accentDanger"),
+            hover_color=theme_color("shell.accentDanger"),
+            corner_radius=4,
+            command=self._on_clear_cache,
+        ).pack(side="left")
+
+        self._cache_status_label = CTkLabel(
+            clear_row,
+            text="",
+            font=Typography.FONT_XS,
+            text_color=theme_color("base.foregroundMuted"),
+        )
+        self._cache_status_label.pack(side="left", padx=Spacing.SM)
+
+    def _on_clear_cache(self) -> None:
+        """Delete the hash cache database so the next scan starts fresh."""
+        cache_paths = [
+            Path.home() / ".cerebro" / "cache" / "hash_cache.sqlite",
+            Path.home() / ".cerebro" / "hash_cache.db",
+            Path("config") / "hash_cache.db",
+        ]
+        cleared = False
+        for p in cache_paths:
+            if p.exists():
+                try:
+                    p.unlink()
+                    cleared = True
+                except OSError:
+                    pass
+        msg = "Cache cleared." if cleared else "Cache already empty."
+        self._cache_status_label.configure(text=msg)
+        self.after(3000, lambda: self._cache_status_label.configure(text=""))
+
     def _build_deletion_tab(self) -> None:
         """Build Deletion settings tab."""
         tab = self._tabview.add("Deletion")

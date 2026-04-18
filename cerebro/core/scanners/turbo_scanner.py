@@ -72,15 +72,15 @@ class DirectorySignature:
     
     @classmethod
     def from_directory(cls, path: Path) -> Optional['DirectorySignature']:
-        """Create signature from directory."""
+        """Create signature from directory (recursive mtime walk)."""
         try:
             if not path.is_dir():
                 return None
-            
+
             stat = path.stat()
             entries = list(path.iterdir())
             file_count = sum(1 for e in entries if e.is_file())
-            
+
             # Quick total size estimate (just immediate children)
             total_size = 0
             for entry in entries:
@@ -89,13 +89,27 @@ class DirectorySignature:
                         total_size += entry.stat().st_size
                 except (OSError, ValueError, RuntimeError, AttributeError, TypeError, KeyError, ImportError):
                     pass
-            
+
             last_modified = stat.st_mtime
-            
+
+            # Fold in mtime of every subdirectory so that adding/removing files
+            # anywhere in the tree is detected without reading file contents.
+            max_sub_mtime: float = 0.0
+            try:
+                for dirpath, _dirs, _files in os.walk(str(path)):
+                    try:
+                        sub_mtime = Path(dirpath).stat().st_mtime
+                        if sub_mtime > max_sub_mtime:
+                            max_sub_mtime = sub_mtime
+                    except OSError:
+                        pass
+            except OSError:
+                pass
+
             # Create checksum
-            sig_data = f"{file_count}:{total_size}:{last_modified}".encode()
+            sig_data = f"{file_count}:{total_size}:{last_modified}:{max_sub_mtime}".encode()
             checksum = hashlib.md5(sig_data).hexdigest()
-            
+
             return cls(
                 path=str(path),
                 file_count=file_count,
