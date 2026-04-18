@@ -8,7 +8,9 @@ Right:  "Themes" and "Settings" text links.
 from __future__ import annotations
 
 import tkinter as tk
-from typing import Callable, Optional
+from typing import Callable, List, Optional
+
+from cerebro.v2.ui.theme_applicator import ThemeApplicator
 
 _NAVY = "#0B1929"
 _LINK = "#7A8FA6"   # white ~30 % blended onto navy background
@@ -30,45 +32,77 @@ class TitleBar(tk.Frame):
         self.pack_propagate(False)
         self._on_settings = on_settings
         self._on_themes   = on_themes
+        self._link_labels: List[tk.Label] = []
+        self._t = ThemeApplicator.get().build_tokens()
         self._build()
+        ThemeApplicator.get().register(self._apply_theme)
 
     # ------------------------------------------------------------------
 
     def _build(self) -> None:
+        t = self._t
+        bg = t.get("title_bar_bg", _NAVY)
+
         # ── Left: traffic lights ──────────────────────────────────────
-        left = tk.Frame(self, bg=_NAVY)
-        left.pack(side="left", padx=(10, 0), fill="y")
+        self._left_frame = tk.Frame(self, bg=bg)
+        self._left_frame.pack(side="left", padx=(10, 0), fill="y")
         for color in ("#FF5F57", "#FFBD2E", "#28CA41"):
-            c = tk.Canvas(left, width=12, height=12,
-                          bg=_NAVY, highlightthickness=0)
+            c = tk.Canvas(self._left_frame, width=12, height=12,
+                          bg=bg, highlightthickness=0)
             c.pack(side="left", padx=3, pady=10)
             c.create_oval(1, 1, 11, 11, fill=color, outline="")
 
         # ── Center: wordmark (placed, not packed, so it stays centred) ─
-        tk.Label(
+        self._wordmark_lbl = tk.Label(
             self,
             text="C E R E B R O",
-            bg=_NAVY,
-            fg="#FFFFFF",
+            bg=bg,
+            fg=t.get("fg", "#FFFFFF"),
             font=("Segoe UI", 9, "bold"),
-        ).place(relx=0.5, rely=0.5, anchor="center")
+        )
+        self._wordmark_lbl.place(relx=0.5, rely=0.5, anchor="center")
 
         # ── Right: text links ─────────────────────────────────────────
-        right = tk.Frame(self, bg=_NAVY)
-        right.pack(side="right", padx=(0, 14), fill="y")
+        self._right_frame = tk.Frame(self, bg=bg)
+        self._right_frame.pack(side="right", padx=(0, 14), fill="y")
 
+        fg2 = t.get("fg2", _LINK)
+        fg  = t.get("fg", "#FFFFFF")
+        self._link_labels = []
         # packed right-to-left so Settings appears rightmost
         for text, cb_attr in [("Settings", "_on_settings"), ("Themes", "_on_themes")]:
             lbl = tk.Label(
-                right, text=text, bg=_NAVY, fg=_LINK,
+                self._right_frame, text=text, bg=bg, fg=fg2,
                 font=("Segoe UI", 9), cursor="hand2",
             )
             lbl.pack(side="right", padx=6)
             cb = getattr(self, cb_attr)
             if cb:
                 lbl.bind("<Button-1>", lambda _e, c=cb: c())
-            lbl.bind("<Enter>", lambda _e, w=lbl: w.configure(fg="#FFFFFF"))
-            lbl.bind("<Leave>", lambda _e, w=lbl: w.configure(fg=_LINK))
+            lbl.bind("<Enter>", lambda _e, w=lbl, f=fg:  w.configure(fg=f))
+            lbl.bind("<Leave>", lambda _e, w=lbl, f=fg2: w.configure(fg=f))
+            self._link_labels.append(lbl)
+
+    # ------------------------------------------------------------------
+
+    def _apply_theme(self, t: dict) -> None:
+        self._t = t
+        bg  = t.get("title_bar_bg", _NAVY)
+        fg  = t.get("fg", "#FFFFFF")
+        fg2 = t.get("fg2", _LINK)
+        self.configure(bg=bg)
+        self._left_frame.configure(bg=bg)
+        for child in self._left_frame.winfo_children():
+            try:
+                child.configure(bg=bg)
+            except Exception:
+                pass
+        self._right_frame.configure(bg=bg)
+        self._wordmark_lbl.configure(bg=bg, fg=fg)
+        for lbl in self._link_labels:
+            lbl.configure(bg=bg, fg=fg2)
+            lbl.bind("<Enter>", lambda _e, w=lbl, f=fg:  w.configure(fg=f))
+            lbl.bind("<Leave>", lambda _e, w=lbl, f=fg2: w.configure(fg=f))
 
     # ------------------------------------------------------------------
     # Public API

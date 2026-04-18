@@ -26,6 +26,7 @@ except ImportError:
     CTkToplevel = tk.Toplevel   # type: ignore[misc,assignment]
 
 from cerebro.engines.base_engine import DuplicateGroup, DuplicateFile
+from cerebro.v2.ui.theme_applicator import ThemeApplicator
 
 # ---------------------------------------------------------------------------
 # Tokens
@@ -156,7 +157,19 @@ class VirtualFileGrid(tk.Canvas):
         last  = min(len(self._rows), first + h // self.ROW_H + 2)
         return first, last
 
+    def apply_theme(self, t: dict) -> None:
+        self._t = t
+        self.configure(bg=t.get("bg", _WHITE))
+        self._render()
+
     def _render(self) -> None:
+        t        = getattr(self, "_t", {})
+        _bg      = t.get("bg",      _WHITE)
+        _row_alt = t.get("row_alt", _ROW_ALT)
+        _sel     = t.get("row_sel", _SELECTED)
+        _sel_fg  = t.get("row_sel_fg", _SEL_FG)
+        _fg_base = t.get("fg",      "#333333")
+
         self.delete("row")
         if not self._rows:
             self.create_text(self.winfo_width() // 2 or 200, 80,
@@ -176,12 +189,12 @@ class VirtualFileGrid(tk.Canvas):
 
             # Row background
             if is_sel:
-                bg = _SELECTED
+                bg = _sel
             elif row.get("_group_shade"):
-                bg = _ROW_ALT
+                bg = _row_alt
             else:
-                bg = _WHITE
-            fg = _SEL_FG if is_sel else "#333333"
+                bg = _bg
+            fg = _sel_fg if is_sel else _fg_base
 
             self.create_rectangle(0, y, w, y + self.ROW_H,
                                   fill=bg, outline="", tags="row")
@@ -429,6 +442,13 @@ class _StatsBar(tk.Frame):
                      font=("Segoe UI", 9)).pack()
             self._labels[key] = val_lbl
 
+    def apply_theme(self, t: dict) -> None:
+        bg = t.get("bg", _WHITE)
+        self.configure(bg=bg)
+        self._labels["duplicates"].configure(fg=t.get("stat_dupes", _RED))
+        self._labels["recoverable"].configure(fg=t.get("stat_space", _GREEN))
+        self._labels["files_scanned"].configure(fg=t.get("fg", "#111111"))
+
     def update(self, files: int, dupes: int, recoverable: int) -> None:
         self._labels["files_scanned"].configure(text=f"{files:,}")
         self._labels["duplicates"].configure(text=f"{dupes:,}")
@@ -568,20 +588,31 @@ class _FilterTabBar(tk.Frame):
             self._ftabs[key] = w
         self._set_active("all")
 
+    def apply_theme(self, t: dict) -> None:
+        self._t_theme = t
+        self.configure(bg=t.get("bg", _WHITE))
+        self._set_active(self._active)
+
     def _click(self, key: str) -> None:
         self._set_active(key)
         self._on_filter(key)
 
     def _set_active(self, key: str) -> None:
+        t          = getattr(self, "_t_theme", {})
+        inactive_bg = t.get("bg",     _WHITE)
+        inactive_fg = t.get("fg2",    _GRAY)
+        active_bg   = t.get("accent", _NAVY_MID)
+        active_fg   = t.get("bg",     _WHITE) if t else _WHITE
+
         if self._active in self._ftabs:
             self._ftabs[self._active].configure(
-                bg=_WHITE, fg=_GRAY, font=("Segoe UI", 10),
+                bg=inactive_bg, fg=inactive_fg, font=("Segoe UI", 10),
                 highlightbackground=_BTN_BD)
         self._active = key
         if key in self._ftabs:
             self._ftabs[key].configure(
-                bg=_NAVY_MID, fg=_WHITE, font=("Segoe UI", 10, "bold"),
-                highlightbackground=_NAVY_MID)
+                bg=active_bg, fg=active_fg, font=("Segoe UI", 10, "bold"),
+                highlightbackground=active_bg)
 
 
 # ===========================================================================
@@ -600,7 +631,10 @@ class ResultsPage(tk.Frame):
         self._groups:   List[DuplicateGroup] = []
         self._all_rows: List[Dict]           = []  # flat, unfiltered
         self._filter    = "all"
+        self._t: dict = {}
         self._build()
+        self._t = ThemeApplicator.get().build_tokens()
+        ThemeApplicator.get().register(self._apply_theme)
 
     # ------------------------------------------------------------------
     def _build(self) -> None:
@@ -644,6 +678,22 @@ class ResultsPage(tk.Frame):
             font=("Segoe UI", 11), justify="center",
         )
         self._empty_lbl.place(relx=0.5, rely=0.4, anchor="center")
+
+    # ------------------------------------------------------------------
+    # Theme
+
+    def _apply_theme(self, t: dict) -> None:
+        self._t = t
+        self.configure(bg=t.get("bg", _WHITE))
+        self._grid.apply_theme(t)
+        try:
+            self._stats_bar.apply_theme(t)
+        except Exception:
+            pass
+        try:
+            self._filter_bar.apply_theme(t)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Public API

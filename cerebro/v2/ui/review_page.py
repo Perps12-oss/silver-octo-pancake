@@ -25,6 +25,7 @@ except ImportError:
     CTkButton = tk.Button  # type: ignore[misc,assignment]
 
 from cerebro.engines.base_engine import DuplicateGroup, DuplicateFile
+from cerebro.v2.ui.theme_applicator import ThemeApplicator
 
 # ---------------------------------------------------------------------------
 # Tokens
@@ -134,6 +135,15 @@ class _BreadcrumbBar(tk.Frame):
         self._file_lbl = tk.Label(self, text="", bg=_NAVY_MID,
                                   fg=_W70, font=("Segoe UI", 9))
         self._file_lbl.pack(side="right", padx=12)
+
+    def apply_theme(self, t: dict) -> None:
+        bg = t.get("nav_bar", _NAVY_MID)
+        self.configure(bg=bg)
+        for w in self.winfo_children():
+            try:
+                w.configure(bg=bg)
+            except Exception:
+                pass
 
     def update(self, group_idx: int, total: int, filename: str) -> None:
         self._group_lbl.configure(text=f"Group {group_idx + 1} of {total}")
@@ -392,29 +402,32 @@ class ReviewPage(tk.Frame):
         self._groups:     List[DuplicateGroup] = []
         self._group_idx:  int                  = 0
         self._preview_file: Optional[DuplicateFile] = None
+        self._t: dict = {}
         self._build()
         self._bind_keys()
+        self._t = ThemeApplicator.get().build_tokens()
+        ThemeApplicator.get().register(self._apply_theme)
 
     # ------------------------------------------------------------------
     def _build(self) -> None:
         # ── Left column ──────────────────────────────────────────────
-        left = tk.Frame(self, bg=_WHITE)
-        left.place(relx=0, rely=0, relwidth=0.55, relheight=1)
+        self._left_col = tk.Frame(self, bg=_WHITE)
+        self._left_col.place(relx=0, rely=0, relwidth=0.55, relheight=1)
 
-        self._breadcrumb = _BreadcrumbBar(left, on_back=self._go_back)
+        self._breadcrumb = _BreadcrumbBar(self._left_col, on_back=self._go_back)
         self._breadcrumb.pack(fill="x")
 
-        self._preview = _PreviewArea(left)
+        self._preview = _PreviewArea(self._left_col)
         self._preview.pack(fill="both", expand=True)
 
         # Action buttons bar
-        acts = tk.Frame(left, bg=_WHITE, height=44)
-        acts.pack(fill="x", side="bottom")
-        acts.pack_propagate(False)
-        tk.Frame(acts, bg=_BORDER, height=1).pack(side="top", fill="x")
+        self._acts_bar = tk.Frame(self._left_col, bg=_WHITE, height=44)
+        self._acts_bar.pack(fill="x", side="bottom")
+        self._acts_bar.pack_propagate(False)
+        tk.Frame(self._acts_bar, bg=_BORDER, height=1).pack(side="top", fill="x")
 
         def _abtn(text, cmd, border=_DIMGRAY):
-            b = tk.Button(acts, text=text, command=cmd,
+            b = tk.Button(self._acts_bar, text=text, command=cmd,
                           bg=_WHITE, fg="#333333",
                           font=("Segoe UI", 10), relief="flat",
                           cursor="hand2", padx=14, pady=6,
@@ -427,17 +440,30 @@ class ReviewPage(tk.Frame):
         _abtn("Open in Explorer",   self._open_in_explorer)
 
         # ── Right column ─────────────────────────────────────────────
-        right = tk.Frame(self, bg=_F8)
-        right.place(relx=0.55, rely=0, relwidth=0.45, relheight=1)
-        tk.Frame(right, bg=_BORDER, width=1).place(x=0, rely=0, relheight=1)
+        self._right_col = tk.Frame(self, bg=_F8)
+        self._right_col.place(relx=0.55, rely=0, relwidth=0.45, relheight=1)
+        tk.Frame(self._right_col, bg=_BORDER, width=1).place(x=0, rely=0, relheight=1)
 
-        self._copy_list = _CopyList(right)
+        self._copy_list = _CopyList(self._right_col)
         self._copy_list.pack(fill="both", expand=True)
 
-        self._group_nav = _GroupNav(right,
+        self._group_nav = _GroupNav(self._right_col,
                                     on_prev=self._prev_group,
                                     on_next=self._next_group)
         self._group_nav.pack(fill="x", side="bottom")
+
+    # ------------------------------------------------------------------
+    def _apply_theme(self, t: dict) -> None:
+        self._t = t
+        self.configure(bg=t.get("bg", _WHITE))
+        self._left_col.configure(bg=t.get("bg", _WHITE))
+        self._right_col.configure(bg=t.get("bg2", _F8))
+        self._breadcrumb.configure(bg=t.get("nav_bar", _NAVY_MID))
+        self._breadcrumb.apply_theme(t)
+        self._preview.configure(bg=t.get("bg", _WHITE))
+        self._acts_bar.configure(bg=t.get("bg", _WHITE))
+        self._copy_list.configure(bg=t.get("bg2", _F8))
+        self._group_nav.configure(bg=t.get("bg", _WHITE))
 
     def _bind_keys(self) -> None:
         self.bind("<Left>",  lambda _e: self._prev_group())

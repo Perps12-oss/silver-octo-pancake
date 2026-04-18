@@ -31,6 +31,7 @@ except ImportError:
     CTkScrollableFrame = tk.Frame      # type: ignore[misc,assignment]
 
 from cerebro.engines.base_engine import ScanProgress, ScanState
+from cerebro.v2.ui.theme_applicator import ThemeApplicator
 
 # ---------------------------------------------------------------------------
 # Design tokens (local — no theme engine dependency)
@@ -235,12 +236,18 @@ class _ModeButton(tk.Frame):
         self._active = active
         self._apply_style()
 
+    def apply_theme(self, t: dict) -> None:
+        self._t = t
+        self._apply_style()
+
     def _apply_style(self) -> None:
-        bg = _NAVY_MID if self._active else _WHITE
-        fg = _WHITE    if self._active else _GRAY
-        self.configure(bg=bg,
-                       highlightbackground=_BTN_BORDER if not self._active else _NAVY_MID,
-                       highlightthickness=1)
+        t = getattr(self, "_t", {})
+        active_bg = t.get("accent", _NAVY_MID)
+        active_fg = t.get("bg", _WHITE)
+        bg = active_bg if self._active else _WHITE
+        fg = active_fg if self._active else _GRAY
+        hb = active_bg if self._active else _BTN_BORDER
+        self.configure(bg=bg, highlightbackground=hb, highlightthickness=1)
         self._inner.configure(bg=bg)
         self._icon_lbl.configure(bg=bg)
         self._text_lbl.configure(bg=bg, fg=fg)
@@ -310,6 +317,18 @@ class _ScanModeBar(tk.Frame):
             self._action_btn.configure(text="STOP SCAN", bg=_RED)
         else:
             self._action_btn.configure(text="START SCAN", bg=_NAVY_MID)
+
+    def apply_theme(self, t: dict) -> None:
+        self.configure(bg=t.get("bg", _WHITE))
+        for btn in self._btns.values():
+            btn.apply_theme(t)
+        if self._scanning:
+            self._action_btn.configure(bg=t.get("danger", _RED))
+        else:
+            self._action_btn.configure(
+                bg=t.get("accent", _NAVY_MID),
+                fg=t.get("bg", _WHITE),
+            )
 
     def get_mode(self) -> str:
         return self._active_key
@@ -475,6 +494,21 @@ class _ActionBar(tk.Frame):
         tk.Label(self, text="+ Send suggestions", bg=_NAVY_BAR,
                  fg="#7A9EC0", font=("Segoe UI", 9)).pack(side="right", padx=12)
 
+    def apply_theme(self, t: dict) -> None:
+        nav = t.get("nav_bar", _NAVY_BAR)
+        acc = t.get("accent", _NAVY_MID)
+        self.configure(bg=nav)
+        for w in self.winfo_children():
+            try:
+                if isinstance(w, tk.Button):
+                    w.configure(bg=nav, activebackground=acc)
+                elif isinstance(w, tk.Frame):
+                    w.configure(bg=nav)
+                elif isinstance(w, tk.Label):
+                    w.configure(bg=nav)
+            except Exception:
+                pass
+
     def _add_folders(self) -> None:
         sel = self._tree.get_selected()
         if sel:
@@ -594,7 +628,10 @@ class ScanPage(tk.Frame):
         self._scanning         = False
         self._scan_start_time  = 0.0
         self._current_mode     = "files"
+        self._t: dict = {}
         self._build()
+        self._t = ThemeApplicator.get().build_tokens()
+        ThemeApplicator.get().register(self._apply_theme)
 
     # ------------------------------------------------------------------
     # Build
@@ -749,6 +786,21 @@ class ScanPage(tk.Frame):
     def _hide_progress(self) -> None:
         self._progress_view.place_forget()
         self._folders_list.place(relwidth=1, relheight=1)
+
+    # ------------------------------------------------------------------
+    # Theme
+
+    def _apply_theme(self, t: dict) -> None:
+        self._t = t
+        self.configure(bg=t.get("bg", _WHITE))
+        try:
+            self._mode_bar.apply_theme(t)
+        except Exception:
+            pass
+        try:
+            self._action_bar.apply_theme(t)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Public API

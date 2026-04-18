@@ -11,6 +11,8 @@ from __future__ import annotations
 import tkinter as tk
 from typing import Callable, Dict, List, Optional, Tuple
 
+from cerebro.v2.ui.theme_applicator import ThemeApplicator
+
 _SURFACE     = "#F0F0F0"
 _WHITE       = "#FFFFFF"
 _BORDER      = "#E0E0E0"
@@ -47,6 +49,7 @@ class _Tab(tk.Frame):
         self._on_click = on_click
         self._active   = False
         self._disabled = False
+        self._t: dict  = {}
 
         # Inner frame holds label + optional badge side-by-side
         self._inner = tk.Frame(self, bg=_SURFACE)
@@ -88,30 +91,37 @@ class _Tab(tk.Frame):
 
     def _hover_in(self, _e=None) -> None:
         if not self._active and not self._disabled:
-            self._lbl.configure(fg=_ACTIVE_FG)
+            self._lbl.configure(fg=self._t.get("fg", _ACTIVE_FG))
 
     def _hover_out(self, _e=None) -> None:
         if not self._active and not self._disabled:
-            self._lbl.configure(fg=_INACTIVE_FG)
+            self._lbl.configure(fg=self._t.get("tab_inactive_fg", _INACTIVE_FG))
 
     def set_active(self, active: bool) -> None:
         self._active = active
+        t = self._t
         if active:
-            bg = _WHITE
+            bg  = t.get("tab_active_bg", _WHITE)
+            fg  = t.get("tab_active_fg", _ACTIVE_FG)
+            ind = t.get("tab_indicator", _ACCENT)
             self.configure(bg=bg)
             self._inner.configure(bg=bg)
-            self._lbl.configure(bg=bg, fg=_ACTIVE_FG, font=("Segoe UI", 10, "bold"))
-            self._indicator.configure(bg=_ACCENT)
+            self._lbl.configure(bg=bg, fg=fg, font=("Segoe UI", 10, "bold"))
+            self._indicator.configure(bg=ind)
         else:
-            bg = _SURFACE
+            bg  = t.get("tab_inactive_bg", _SURFACE)
+            if self._disabled:
+                fg = t.get("fg_muted", _DISABLED_FG)
+            else:
+                fg = t.get("tab_inactive_fg", _INACTIVE_FG)
             self.configure(bg=bg)
             self._inner.configure(bg=bg)
-            self._lbl.configure(
-                bg=bg,
-                fg=_DISABLED_FG if self._disabled else _INACTIVE_FG,
-                font=("Segoe UI", 10),
-            )
+            self._lbl.configure(bg=bg, fg=fg, font=("Segoe UI", 10))
             self._indicator.configure(bg=bg)
+
+    def apply_theme(self, t: dict) -> None:
+        self._t = t
+        self.set_active(self._active)
 
     def set_disabled(self, disabled: bool) -> None:
         self._disabled = disabled
@@ -145,20 +155,33 @@ class TabBar(tk.Frame):
         self._on_tab_changed = on_tab_changed
         self._tabs: Dict[str, _Tab] = {}
         self._active_key: str = "welcome"
+        self._t = ThemeApplicator.get().build_tokens()
 
         self._build()
         # Bottom border drawn as a child frame
-        tk.Frame(self, bg=_BORDER, height=1).pack(side="bottom", fill="x")
+        self._bottom_border = tk.Frame(self, bg=_BORDER, height=1)
+        self._bottom_border.pack(side="bottom", fill="x")
+        ThemeApplicator.get().register(self._apply_theme)
 
     def _build(self) -> None:
-        inner = tk.Frame(self, bg=_SURFACE)
-        inner.pack(side="left", fill="y")
+        self._inner_frame = tk.Frame(self, bg=self._t.get("tab_bg", _SURFACE))
+        self._inner_frame.pack(side="left", fill="y")
         for key, label in TABS:
-            tab = _Tab(inner, key=key, label=label, on_click=self._tab_clicked)
+            tab = _Tab(self._inner_frame, key=key, label=label, on_click=self._tab_clicked)
             tab.pack(side="left", fill="y")
             self._tabs[key] = tab
         self._tabs["welcome"].set_active(True)
         self._tabs["review"].set_disabled(True)
+
+    def _apply_theme(self, t: dict) -> None:
+        self._t = t
+        bg     = t.get("tab_bg", _SURFACE)
+        border = t.get("border", _BORDER)
+        self.configure(bg=bg)
+        self._inner_frame.configure(bg=bg)
+        self._bottom_border.configure(bg=border)
+        for tab in self._tabs.values():
+            tab.apply_theme(t)
 
     def _tab_clicked(self, key: str) -> None:
         if key == self._active_key:

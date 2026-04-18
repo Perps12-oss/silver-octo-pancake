@@ -22,6 +22,8 @@ import tkinter as tk
 from datetime import datetime
 from typing import Any, Callable, List, Optional
 
+from cerebro.v2.ui.theme_applicator import ThemeApplicator
+
 _NAVY     = "#0B1929"
 _NAVY_MID = "#1E3A5F"
 _RED      = "#E74C3C"
@@ -95,10 +97,11 @@ def _load_stats():
 # Logo canvas
 # ---------------------------------------------------------------------------
 
-def _draw_logo(parent: tk.Widget) -> tk.Canvas:
+def _draw_logo(parent: tk.Widget, bg: str = _NAVY, logo_bg: str = _NAVY_MID,
+               danger: str = _RED) -> tk.Canvas:
     SIZE, RADIUS = 52, 13
     c = tk.Canvas(parent, width=SIZE, height=SIZE,
-                  bg=_NAVY, highlightthickness=0)
+                  bg=bg, highlightthickness=0)
     c.pack()
 
     # Rounded rectangle in navy-mid
@@ -112,13 +115,13 @@ def _draw_logo(parent: tk.Widget) -> tk.Canvas:
     ]:
         c.create_arc(x, y, x + 2*r, y + 2*r,
                      start=start, extent=90,
-                     fill=_NAVY_MID, outline="")
-    c.create_rectangle(x0+r, y0,   x1-r, y1,   fill=_NAVY_MID, outline="")
-    c.create_rectangle(x0,   y0+r, x1,   y1-r, fill=_NAVY_MID, outline="")
+                     fill=logo_bg, outline="")
+    c.create_rectangle(x0+r, y0,   x1-r, y1,   fill=logo_bg, outline="")
+    c.create_rectangle(x0,   y0+r, x1,   y1-r, fill=logo_bg, outline="")
 
     # 2×2 grid of squares
     PAD, GAP, SQ = 10, 3, 11
-    colors = [["#F0EFEC", _RED], ["#4A6070", "#3A4E62"]]
+    colors = [["#F0EFEC", danger], ["#4A6070", "#3A4E62"]]
     for ri in range(2):
         for ci in range(2):
             cx = PAD + ci * (SQ + GAP)
@@ -146,141 +149,165 @@ class WelcomePage(tk.Frame):
         super().__init__(master, **kwargs)
         self._on_start_scan   = on_start_scan
         self._on_open_session = on_open_session
+        self._t: dict = {}
         self._build()
+        self._t = ThemeApplicator.get().build_tokens()
+        ThemeApplicator.get().register(self._apply_theme)
 
     # ------------------------------------------------------------------
 
+    def _apply_theme(self, t: dict) -> None:
+        self._t = t
+        self.configure(bg=t.get("bg", _NAVY))
+        for w in self.winfo_children():
+            w.destroy()
+        self._build()
+
     def _build(self) -> None:
+        t = self._t
+        bg       = t.get("bg", _NAVY)
+        nav_bg   = t.get("nav_bar", _NAVY_MID)
+        nav_hov  = t.get("accent2", _NAVY_MID_HOVER)
+        fg       = t.get("fg", _WHITE)
+        danger   = t.get("danger", _RED)
+        success  = t.get("success", _GREEN)
+
         scans, dupes, recovered, recent = _load_stats()
         last = recent[0] if recent else None
 
         # ── Scrollable body (centred column) ─────────────────────────
-        body = tk.Frame(self, bg=_NAVY)
+        body = tk.Frame(self, bg=bg)
         body.place(relx=0.5, y=0, anchor="n")
 
         # 56 px top padding
-        tk.Frame(body, bg=_NAVY, height=56).pack()
+        tk.Frame(body, bg=bg, height=56).pack()
 
         # Logo
-        _draw_logo(body)
+        _draw_logo(body, bg=bg, logo_bg=nav_bg, danger=danger)
 
         # 28 px gap
-        tk.Frame(body, bg=_NAVY, height=28).pack()
+        tk.Frame(body, bg=bg, height=28).pack()
 
         # "CEREBRO" sub-tagline
-        tk.Label(body, text="CEREBRO", bg=_NAVY, fg=_W28,
+        tk.Label(body, text="CEREBRO", bg=bg, fg=_W28,
                  font=("Segoe UI", 8, "bold")).pack()
 
         # 16 px gap
-        tk.Frame(body, bg=_NAVY, height=16).pack()
+        tk.Frame(body, bg=bg, height=16).pack()
 
         # Headline line 1
         tk.Label(body, text="Find duplicates.",
-                 bg=_NAVY, fg=_WHITE,
+                 bg=bg, fg=fg,
                  font=("Segoe UI", 28, "bold")).pack()
 
         # Headline line 2 — mixed colour
-        h2 = tk.Frame(body, bg=_NAVY)
+        h2 = tk.Frame(body, bg=bg)
         h2.pack()
-        tk.Label(h2, text="Reclaim your ", bg=_NAVY, fg=_WHITE,
+        tk.Label(h2, text="Reclaim your ", bg=bg, fg=fg,
                  font=("Segoe UI", 28, "bold")).pack(side="left")
-        tk.Label(h2, text="space.", bg=_NAVY, fg=_RED,
+        tk.Label(h2, text="space.", bg=bg, fg=danger,
                  font=("Segoe UI", 28, "bold")).pack(side="left")
 
         # 10 px gap
-        tk.Frame(body, bg=_NAVY, height=10).pack()
+        tk.Frame(body, bg=bg, height=10).pack()
 
         # Subtitle
         tk.Label(
             body,
             text="Intelligent deduplication for your entire drive.",
-            bg=_NAVY, fg=_W38,
+            bg=bg, fg=_W38,
             font=("Segoe UI", 11),
             wraplength=340, justify="center",
         ).pack()
 
         # 44 px gap
-        tk.Frame(body, bg=_NAVY, height=44).pack()
+        tk.Frame(body, bg=bg, height=44).pack()
 
         # Action buttons
-        self._build_buttons(body, last)
+        self._build_buttons(body, last, bg=bg, nav_bg=nav_bg,
+                            nav_hov=nav_hov, fg=fg)
 
         # 52 px gap
-        tk.Frame(body, bg=_NAVY, height=52).pack()
+        tk.Frame(body, bg=bg, height=52).pack()
 
         # Stats row
-        self._build_stats(body, scans, dupes, recovered)
+        self._build_stats(body, scans, dupes, recovered,
+                          bg=bg, fg=fg, danger=danger, success=success)
 
         # ── Recent bar — pinned to bottom of the page ─────────────────
-        self._build_recent_bar(recent)
+        self._build_recent_bar(recent, bg=bg)
 
-    def _build_buttons(self, parent: tk.Frame, last_session: Any) -> None:
-        row = tk.Frame(parent, bg=_NAVY)
+    def _build_buttons(self, parent: tk.Frame, last_session: Any,
+                       bg: str = _NAVY, nav_bg: str = _NAVY_MID,
+                       nav_hov: str = _NAVY_MID_HOVER, fg: str = _WHITE) -> None:
+        row = tk.Frame(parent, bg=bg)
         row.pack()
 
         start_btn = tk.Button(
             row, text="Start new scan",
-            bg=_NAVY_MID, fg=_WHITE,
+            bg=nav_bg, fg=fg,
             font=("Segoe UI", 11, "bold"),
             relief="flat", cursor="hand2",
             padx=28, pady=11,
-            bd=0, activebackground=_NAVY_MID_HOVER, activeforeground=_WHITE,
+            bd=0, activebackground=nav_hov, activeforeground=fg,
             command=self._start_scan,
         )
         start_btn.pack(side="left", padx=(0, 12))
-        _hover(start_btn, _NAVY_MID, _NAVY_MID_HOVER)
+        _hover(start_btn, nav_bg, nav_hov)
 
         open_btn = tk.Button(
             row, text="Open last session",
-            bg=_NAVY, fg=_W45,
+            bg=bg, fg=_W45,
             font=("Segoe UI", 11),
             relief="flat",
             padx=28, pady=10,
             bd=1,
             highlightbackground=_W12, highlightthickness=1,
-            activebackground=_NAVY, activeforeground=_WHITE,
+            activebackground=bg, activeforeground=fg,
             command=lambda: self._open_session(last_session),
         )
         if not last_session:
             open_btn.configure(state="disabled", cursor="", fg=_W28)
         else:
             open_btn.configure(cursor="hand2")
-            _hover(open_btn, _NAVY, "#1A2C40")
+            _hover(open_btn, bg, "#1A2C40")
         open_btn.pack(side="left")
 
     def _build_stats(self, parent: tk.Frame,
-                     scans: int, dupes: int, recovered: int) -> None:
-        row = tk.Frame(parent, bg=_NAVY)
+                     scans: int, dupes: int, recovered: int,
+                     bg: str = _NAVY, fg: str = _WHITE,
+                     danger: str = _RED, success: str = _GREEN) -> None:
+        row = tk.Frame(parent, bg=bg)
         row.pack()
 
         data = [
-            (str(scans),          _WHITE, "Scans run"),
-            (str(dupes),          _RED,   "Duplicates found"),
-            (_fmt_bytes(recovered), _GREEN, "Space recovered"),
+            (str(scans),            fg,      "Scans run"),
+            (str(dupes),            danger,  "Duplicates found"),
+            (_fmt_bytes(recovered), success, "Space recovered"),
         ]
         for i, (val, val_fg, lbl) in enumerate(data):
             if i:
                 tk.Frame(row, bg=_W8, width=1).pack(
                     side="left", fill="y", padx=24, pady=4)
-            col = tk.Frame(row, bg=_NAVY)
+            col = tk.Frame(row, bg=bg)
             col.pack(side="left")
-            tk.Label(col, text=val, bg=_NAVY, fg=val_fg,
+            tk.Label(col, text=val, bg=bg, fg=val_fg,
                      font=("Segoe UI", 20, "bold")).pack()
-            tk.Label(col, text=lbl.upper(), bg=_NAVY, fg=_W25,
+            tk.Label(col, text=lbl.upper(), bg=bg, fg=_W25,
                      font=("Segoe UI", 8)).pack()
 
-    def _build_recent_bar(self, recent: List[Any]) -> None:
-        bar = tk.Frame(self, bg=_NAVY, height=44)
+    def _build_recent_bar(self, recent: List[Any], bg: str = _NAVY) -> None:
+        bar = tk.Frame(self, bg=bg, height=44)
         bar.place(relx=0, rely=1.0, anchor="sw", relwidth=1)
         bar.pack_propagate(False)
 
         # Top border
         tk.Frame(bar, bg=_W6, height=1).pack(fill="x")
 
-        inner = tk.Frame(bar, bg=_NAVY)
+        inner = tk.Frame(bar, bg=bg)
         inner.pack(fill="both", expand=True, padx=20)
 
-        tk.Label(inner, text="RECENT", bg=_NAVY, fg=_W22,
+        tk.Label(inner, text="RECENT", bg=bg, fg=_W22,
                  font=("Segoe UI", 8, "bold")).pack(side="left", padx=(0, 12))
 
         if recent:
@@ -296,11 +323,11 @@ class WelcomePage(tk.Frame):
                 chip.bind("<Enter>",    lambda _e, w=chip: w.configure(bg=_W9, fg=_W65))
                 chip.bind("<Leave>",    lambda _e, w=chip: w.configure(bg=_W5, fg=_W38))
         else:
-            tk.Label(inner, text="No scans yet", bg=_NAVY, fg=_W22,
+            tk.Label(inner, text="No scans yet", bg=bg, fg=_W22,
                      font=("Segoe UI", 9)).pack(side="left")
 
         new_lbl = tk.Label(
-            inner, text="+ New scan", bg=_NAVY, fg=_W20,
+            inner, text="+ New scan", bg=bg, fg=_W20,
             font=("Segoe UI", 9), cursor="hand2",
         )
         new_lbl.pack(side="right")
