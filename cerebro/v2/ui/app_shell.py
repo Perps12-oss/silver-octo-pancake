@@ -29,6 +29,7 @@ from cerebro.v2.ui.tab_bar      import TabBar
 from cerebro.v2.ui.welcome_page import WelcomePage
 from cerebro.v2.ui.scan_page    import ScanPage
 from cerebro.v2.ui.results_page import ResultsPage
+from cerebro.v2.ui.review_page  import ReviewPage
 from cerebro.engines.orchestrator import ScanOrchestrator
 
 _PAGE_BG = "#F0F0F0"
@@ -91,10 +92,16 @@ class AppShell(CTk):
         self._page_container = CTkFrame(self, fg_color=_PAGE_BG)
         self._page_container.pack(fill="both", expand=True)
 
-        # Build pages — Welcome, Scan, Results are real; rest are placeholders
+        # Build pages — Welcome, Scan, Results, Review are real; rest placeholders
         self._pages: Dict[str, CTkFrame] = {}
-        for key in ("review", "history", "diagnostics"):
+        for key in ("history", "diagnostics"):
             self._pages[key] = self._make_placeholder(key)
+
+        self._review_page = ReviewPage(
+            self._page_container,
+            on_back=lambda: self.switch_tab("results"),
+        )
+        self._pages["review"] = self._review_page
 
         self._results_page = ResultsPage(
             self._page_container,
@@ -173,9 +180,8 @@ class AppShell(CTk):
         self.switch_tab("results")
 
     def _on_open_group(self, group_id: int, groups: list) -> None:
-        """Called when user double-clicks a group in Results — opens Review tab (Phase 5)."""
-        self._active_group_id = group_id
-        self._active_groups   = groups
+        """Called when user double-clicks a group in Results — opens Review tab."""
+        self._review_page.load_group(groups, group_id)
         self.switch_tab("review")
 
     # ------------------------------------------------------------------
