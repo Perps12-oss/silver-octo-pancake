@@ -14,6 +14,7 @@ import hashlib
 import os
 import time
 import threading
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable, List, Optional
@@ -192,6 +193,10 @@ class FileDedupEngine(BaseEngine):
             # Stage 1: Discover files
             self._update_progress(progress_callback, "Discovering files...")
             files = self._discover_files()
+            logger.info(
+                "[DIAG:DISCOVERY] folders=%d discovered=%d",
+                len(self._folders), len(files),
+            )
 
             if self._cancel_event.is_set():
                 self._state = ScanState.CANCELLED
@@ -209,6 +214,16 @@ class FileDedupEngine(BaseEngine):
             # Stage 2: Group by size
             self._update_progress(progress_callback, "Grouping by size...")
             size_groups = self._group_by_size(files)
+            _diag_size_candidates = sum(len(v) for v in size_groups.values())
+            logger.info(
+                "[DIAG:REDUCE] after_size_group size_groups=%d candidates=%d",
+                len(size_groups), _diag_size_candidates,
+            )
+            for _diag_sz, _diag_grp in size_groups.items():
+                _diag_cap = min(len(_diag_grp), 8)
+                for _diag_i in range(_diag_cap):
+                    for _diag_j in range(_diag_i + 1, _diag_cap):
+                        _diagnose_pair(str(_diag_grp[_diag_i]), str(_diag_grp[_diag_j]), _diag_sz)
 
             if self._cancel_event.is_set():
                 self._state = ScanState.CANCELLED
@@ -217,6 +232,11 @@ class FileDedupEngine(BaseEngine):
             # Stage 3: Partial hash for size groups
             self._update_progress(progress_callback, "Computing partial hashes...")
             partial_groups = self._compute_partial_hashes(size_groups, progress_callback)
+            _diag_partial_candidates = sum(len(v) for v in partial_groups.values())
+            logger.info(
+                "[DIAG:REDUCE] after_partial_hash groups=%d candidates=%d",
+                len(partial_groups), _diag_partial_candidates,
+            )
 
             if self._cancel_event.is_set():
                 self._state = ScanState.CANCELLED
@@ -225,6 +245,11 @@ class FileDedupEngine(BaseEngine):
             # Stage 4: Full hash for matches
             self._update_progress(progress_callback, "Computing full hashes...")
             hash_groups = self._compute_full_hashes(partial_groups, progress_callback)
+            _diag_full_candidates = sum(len(v) for v in hash_groups.values())
+            logger.info(
+                "[DIAG:REDUCE] after_full_hash groups=%d candidates=%d",
+                len(hash_groups), _diag_full_candidates,
+            )
 
             if self._cancel_event.is_set():
                 self._state = ScanState.CANCELLED
@@ -236,6 +261,13 @@ class FileDedupEngine(BaseEngine):
 
             # Final update
             elapsed = time.time() - self._start_time
+            logger.info(
+                "[DIAG:SUMMARY] scan=files_classic discovered=%d size_candidates=%d"
+                " partial_groups=%d full_groups=%d result_groups=%d elapsed=%.2fs",
+                len(files), _diag_size_candidates,
+                len(partial_groups), len(hash_groups),
+                len(self._results), elapsed,
+            )
             self._progress = ScanProgress(
                 state=ScanState.COMPLETED,
                 files_scanned=len(files),
@@ -625,3 +657,28 @@ class FileDedupEngine(BaseEngine):
 
 # Simple logger fallback
 logger = __import__('logging').getLogger(__name__)
+
+
+def _diagnose_pair(path_a: str, path_b: str, size: int) -> None:
+    """Log if two same-size paths resolve to the same canonical file (inode or realpath)."""
+    try:
+        a_real = unicodedata.normalize("NFC", os.path.normcase(os.path.realpath(path_a))).strip()
+        b_real = unicodedata.normalize("NFC", os.path.normcase(os.path.realpath(path_b))).strip()
+        if a_real == b_real:
+            logger.info(
+                "[DIAG:REDUCE] canonical-path collision size=%d path_a=%.80s path_b=%.80s",
+                size, path_a, path_b,
+            )
+            return
+    except (OSError, ValueError):
+        pass
+    try:
+        a_st = os.stat(path_a)
+        b_st = os.stat(path_b)
+        if a_st.st_ino != 0 and a_st.st_ino == b_st.st_ino and a_st.st_dev == b_st.st_dev:
+            logger.info(
+                "[DIAG:REDUCE] inode collision size=%d ino=%d dev=%d path_a=%.80s path_b=%.80s",
+                size, a_st.st_ino, a_st.st_dev, path_a, path_b,
+            )
+    except (OSError, ValueError):
+        pass

@@ -22,16 +22,45 @@ from __future__ import annotations
 import os
 import time
 import hashlib
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor
 
 from cerebro.services.hash_cache import HashCache, StatSignature
+from cerebro.services.logger import get_logger
 
 ProgressCB = Callable[[int, str, Dict[str, Any]], None]
 
 MAX_WORKERS_LIMIT = 32
+
+logger = get_logger(__name__)
+
+
+def _diagnose_pair(path_a: str, path_b: str, size: int) -> None:
+    """Log if two same-size paths resolve to the same canonical file (inode or realpath)."""
+    try:
+        a_real = unicodedata.normalize("NFC", os.path.normcase(os.path.realpath(path_a))).strip()
+        b_real = unicodedata.normalize("NFC", os.path.normcase(os.path.realpath(path_b))).strip()
+        if a_real == b_real:
+            logger.info(
+                "[DIAG:REDUCE] canonical-path collision size=%d path_a=%.80s path_b=%.80s",
+                size, path_a, path_b,
+            )
+            return
+    except (OSError, ValueError):
+        pass
+    try:
+        a_st = os.stat(path_a)
+        b_st = os.stat(path_b)
+        if a_st.st_ino != 0 and a_st.st_ino == b_st.st_ino and a_st.st_dev == b_st.st_dev:
+            logger.info(
+                "[DIAG:REDUCE] inode collision size=%d ino=%d dev=%d path_a=%.80s path_b=%.80s",
+                size, a_st.st_ino, a_st.st_dev, path_a, path_b,
+            )
+    except (OSError, ValueError):
+        pass
 
 
 class _HashCache:
@@ -225,15 +254,29 @@ class FastPipeline:
         if cancelled():
             return {"cancelled": True, "ok": False, "stats": {"files_scanned": len(files)}}
 
+        logger.info(
+            "[DIAG:DISCOVERY] root=%s discovered=%d min_size=%d",
+            root, len(files), min_size,
+        )
+
         emit(20, f"Grouping by size ({len(files):,} files)…", {"phase": "grouping", "files_scanned": len(files)})
         size_map: Dict[int, List[FastFileInfo]] = {}
         for f in files:
             size_map.setdefault(f.size, []).append(f)
 
         candidates: List[FastFileInfo] = []
-        for _, arr in size_map.items():
-            if len(arr) > 1:
-                candidates.extend(arr)
+        for _fp_sz, _fp_arr in size_map.items():
+            if len(_fp_arr) > 1:
+                candidates.extend(_fp_arr)
+                _fp_cap = min(len(_fp_arr), 8)
+                for _fp_i in range(_fp_cap):
+                    for _fp_j in range(_fp_i + 1, _fp_cap):
+                        _diagnose_pair(_fp_arr[_fp_i].path, _fp_arr[_fp_j].path, _fp_sz)
+
+        logger.info(
+            "[DIAG:REDUCE] after_size_group size_groups=%d candidates=%d",
+            sum(1 for arr in size_map.values() if len(arr) > 1), len(candidates),
+        )
 
         if cancelled():
             return {"cancelled": True, "ok": False, "stats": {"files_scanned": len(files)}}
@@ -310,6 +353,13 @@ class FastPipeline:
         if cancelled():
             return {"cancelled": True, "ok": False, "stats": {"files_scanned": len(files)}}
 
+        _diag_hash_groups = sum(1 for paths in hash_groups.values() if len(paths) >= 2)
+        _diag_hash_candidates = sum(len(paths) for paths in hash_groups.values() if len(paths) >= 2)
+        logger.info(
+            "[DIAG:REDUCE] after_quick_hash groups=%d candidates=%d",
+            _diag_hash_groups, _diag_hash_candidates,
+        )
+
         emit(92, "Finalizing results…", {"phase": "finalizing", "files_scanned": len(files)})
 
         groups = []
@@ -319,6 +369,11 @@ class FastPipeline:
             groups.append({"hash": h, "size": None, "paths": paths, "count": len(paths)})
 
         elapsed = time.time() - start
+        logger.info(
+            "[DIAG:SUMMARY] scan=fast_pipeline discovered=%d size_candidates=%d"
+            " final_groups=%d elapsed=%.2fs",
+            len(files), len(candidates), len(groups), elapsed,
+        )
         emit(100, f"FAST MODE done: {len(groups)} duplicate groups", {
             "phase": "completed",
             "elapsed": elapsed,
