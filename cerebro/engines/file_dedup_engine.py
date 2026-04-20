@@ -28,6 +28,7 @@ from cerebro.engines.base_engine import (
     EngineOption
 )
 from cerebro.engines.hash_cache import HashCache
+from cerebro.core.root_dedup import dedupe_roots
 
 
 # Hash algorithm support
@@ -128,7 +129,16 @@ class FileDedupEngine(BaseEngine):
     def configure(self, folders: List[Path], protected: List[Path],
                  options: dict) -> None:
         """Configure scan parameters."""
-        self._folders = [Path(f) for f in folders]
+        user_folders = [Path(f) for f in folders]
+        self._folders = dedupe_roots(user_folders)
+        if len(self._folders) != len(user_folders):
+            collapsed = [str(f) for f in user_folders if f.resolve() not in {s.resolve() for s in self._folders}]
+            logger.info(
+                "[ROOT_DEDUP] user_roots=%d deduped_roots=%d collapsed=%s",
+                len(user_folders), len(self._folders), collapsed,
+            )
+        else:
+            logger.info("[ROOT_DEDUP] user_roots=%d deduped_roots=%d (no overlap)", len(user_folders), len(self._folders))
         self._protected = [Path(p) for p in protected]
         # Merge with defaults
         merged = self._default_options.copy()

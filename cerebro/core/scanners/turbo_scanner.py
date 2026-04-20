@@ -35,6 +35,7 @@ import unicodedata
 from cerebro.core.models import FileMetadata
 from cerebro.services.hash_cache import HashCache, StatSignature
 from cerebro.services.logger import get_logger
+from cerebro.core.root_dedup import dedupe_roots
 
 logger = get_logger(__name__)
 
@@ -548,9 +549,19 @@ class TurboScanner:
                 pass
         
         # Phase 1: Parallel directory discovery
+        user_roots = list(roots)
+        scan_roots = dedupe_roots(user_roots)
+        if len(scan_roots) != len(user_roots):
+            collapsed = [str(r) for r in user_roots if Path(r).resolve() not in {Path(s).resolve() for s in scan_roots}]
+            logger.info(
+                "[ROOT_DEDUP] user_roots=%d deduped_roots=%d collapsed=%s",
+                len(user_roots), len(scan_roots), collapsed,
+            )
+        else:
+            logger.info("[ROOT_DEDUP] user_roots=%d deduped_roots=%d (no overlap)", len(user_roots), len(scan_roots))
         logger.info("[Turbo] Phase 1: Discovering files...")
         _emit("discovering", 0, 0)
-        discovered_files = self._discover_files_parallel(roots, emit=_emit)
+        discovered_files = self._discover_files_parallel(scan_roots, emit=_emit)
         _emit("discovering", len(discovered_files), len(discovered_files))
         logger.info(
             "[Turbo] Discovered %d files in %.2fs",
