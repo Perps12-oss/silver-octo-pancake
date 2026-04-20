@@ -37,7 +37,6 @@ def _assert_no_self_duplicates(group: list, group_key: str = "?") -> Tuple[list,
 
     Accepts heterogeneous group formats:
       - List of (path, mtime) tuples  — turbo_scanner (Paths A/C)
-      - List of str paths             — fast_pipeline (Path B)
       - List of Path objects          — file_dedup_engine (Path D)
 
     Each item is returned as-is in the kept list; only the path is extracted

@@ -2,8 +2,13 @@
 SimpleScanner — Quick, minimal scanner for duplicate detection (Option B)
 =========================================================================
 
-This is a lightweight scanner used by the duplicate ScanWorker in "quick"
-mode. It is deliberately much simpler than the advanced FileScanner:
+Lightweight single-threaded scanner used by cerebro/core/scanners/__init__.py
+as a fallback path. The legacy ScanWorker that originally consumed this
+scanner was removed in the post-v1 "single entrance" cleanup; this module
+is kept because cerebro/core/scanners/__init__.py still instantiates it as
+a fallback for test harnesses and any ad-hoc callers of scan_directory().
+
+It is deliberately much simpler than the advanced FileScanner:
 
 - No multi-threading
 - No system/venv/cache directory exclusion heuristics
@@ -55,7 +60,7 @@ class SimpleScanner:
         }
 
     # ------------------------------------------------------------------
-    # NOTE: This is the ONLY entry-point ScanWorker uses.
+    # Single entry point: synchronous, returns a list of FileMetadata.
     # ------------------------------------------------------------------
     def scan_directory(self, directory: Path, options: Dict[str, Any], *, cancel_event: Any = None) -> List[FileMetadata]:
         directory = Path(directory)

@@ -326,10 +326,14 @@ class PipelineResult:
     """
     Legacy scan pipeline result placeholder.
 
-    This exists ONLY to satisfy older v5 imports
-    (ScanWorker, FastScanWorker, LiveScanController).
+    Historical: existed to satisfy older v5 scan-worker imports. Those workers
+    (ScanWorker, FastScanWorker) and the FastPipeline / legacy PyQt surface
+    were removed in the post-v1 audit "single entrance" cleanup. This type is
+    kept as a no-op dataclass-ish placeholder so any out-of-tree code that
+    still imports it does not explode at import time.
 
-    The authoritative scan result handling lives elsewhere.
+    The authoritative scan result handling lives in the engine layer
+    (BaseEngine.get_results() -> List[DuplicateGroup]).
     """
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
