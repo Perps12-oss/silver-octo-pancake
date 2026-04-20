@@ -243,10 +243,6 @@ class AppShell(CTk):
 
     def _on_scan_complete(self, results: list) -> None:
         """Called by ScanPage when a scan finishes."""
-        _log.info(
-            "[PHASE3.0:COMPLETE] _on_scan_complete fired results=%d — record_scan NOT called here",
-            len(results),
-        )
         self._scan_results = results
         self._results_page.load_results(results)
         dup_count = sum(max(0, len(g.files) - 1) for g in results)
