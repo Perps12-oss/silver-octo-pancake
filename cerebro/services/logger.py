@@ -21,6 +21,7 @@ import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional, Generator
 
@@ -67,6 +68,73 @@ class _ScanIdFilter(logging.Filter):
 _configured = False
 _config_lock = threading.Lock()
 _current_log_file: Optional[Path] = None
+
+
+class _WindowsSafeRotatingFileHandler(RotatingFileHandler):
+    """RotatingFileHandler that survives Windows os.rename failures.
+
+    Problem:
+        On Windows, RotatingFileHandler.doRollover() calls os.rename(log → log.1).
+        If any other process has either file open (common: a previous app instance
+        that crashed without releasing the handle, or two app instances running
+        concurrently), the rename raises PermissionError [WinError 32]. The base
+        class's emit() then calls handleError() which prints a 20-line traceback
+        for every subsequent log call — the file stays oversized, so
+        shouldRollover() keeps returning True and each emit retries the rename.
+
+    Fix:
+        - doRollover(): swallow PermissionError/OSError, reopen the stream so
+          subsequent emits still write to the same (now-oversized) file, and
+          disable further rollover attempts for the rest of this process so we
+          don't spam retries. One warning to stderr per process.
+        - handleError(): suppress the traceback path entirely. Known issue,
+          one-line stderr notice is enough.
+
+    On Linux / macOS / happy-path Windows this class behaves exactly like the
+    stock RotatingFileHandler.
+    """
+
+    # Class-level flags so every handler instance in the process shares state.
+    _rollover_warned: bool = False
+    _rollover_disabled: bool = False
+
+    def shouldRollover(self, record) -> int:
+        if _WindowsSafeRotatingFileHandler._rollover_disabled:
+            return 0
+        return super().shouldRollover(record)
+
+    def doRollover(self) -> None:
+        try:
+            super().doRollover()
+        except (PermissionError, OSError) as exc:
+            # The base class closed self.stream before the os.rename attempt;
+            # reopen it so subsequent writes land in the oversized file.
+            try:
+                self.stream = self._open()
+            except (OSError, ValueError):
+                self.stream = None
+
+            _WindowsSafeRotatingFileHandler._rollover_disabled = True
+
+            if not _WindowsSafeRotatingFileHandler._rollover_warned:
+                _WindowsSafeRotatingFileHandler._rollover_warned = True
+                try:
+                    sys.stderr.write(
+                        f"[cerebro.logger] rotation of {self.baseFilename} "
+                        f"failed ({exc.__class__.__name__}: {exc}); "
+                        f"rollover disabled for this session, log file will "
+                        f"grow past configured maxBytes.\n"
+                    )
+                    sys.stderr.flush()
+                except (OSError, ValueError):
+                    pass
+
+    def handleError(self, record) -> None:
+        # Default handleError prints traceback.print_exc() which, combined with
+        # rollover retry-on-every-emit, produces the 20-line-per-log-call spam
+        # we are trying to eliminate. Silent swallow is the intended behaviour
+        # for this handler.
+        return
 
 
 def _safe_logs_dir() -> Path:
@@ -156,16 +224,15 @@ def _configure_root(level: int = logging.INFO,
         if log_to_file:
             try:
                 logs_dir = _safe_logs_dir()
-                # Use rotating file handler instead of timestamp-based
-                from logging.handlers import RotatingFileHandler
                 log_file = logs_dir / "cerebro.log"
                 _current_log_file = log_file
-                
-                fh = RotatingFileHandler(
+
+                fh = _WindowsSafeRotatingFileHandler(
                     log_file,
                     maxBytes=file_max_size,
                     backupCount=file_backup_count,
-                    encoding="utf-8"
+                    encoding="utf-8",
+                    delay=True,  # defer open until first write
                 )
                 fh.setLevel(level)
                 fh.setFormatter(formatter)
