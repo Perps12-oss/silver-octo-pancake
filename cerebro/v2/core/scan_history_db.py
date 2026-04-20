@@ -63,6 +63,11 @@ class ScanHistoryDB:
         duration_seconds: float,
         timestamp: float | None = None,
     ) -> None:
+        import logging as _logging
+        _logging.getLogger(__name__).debug(
+            "[PHASE3.0:INSERT] record_scan called mode=%s folders=%d groups=%d",
+            mode, len(folders), groups_found,
+        )
         with self._lock:
             self._conn.execute(
                 """
