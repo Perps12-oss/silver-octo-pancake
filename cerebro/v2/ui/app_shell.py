@@ -243,7 +243,7 @@ class AppShell(CTk):
 
     def _on_scan_complete(self, results: list) -> None:
         """Called by ScanPage when a scan finishes."""
-        _log.debug(
+        _log.info(
             "[PHASE3.0:COMPLETE] _on_scan_complete fired results=%d — record_scan NOT called here",
             len(results),
         )

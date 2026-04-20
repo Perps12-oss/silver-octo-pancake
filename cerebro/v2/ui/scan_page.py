@@ -960,7 +960,7 @@ class ScanPage(tk.Frame):
 
     def _start_scan(self) -> None:
         import logging as _logging
-        _logging.getLogger(__name__).debug(
+        _logging.getLogger(__name__).info(
             "[PHASE3.0:GUARD] _start_scan entered scanning=%s", self._scanning
         )
         folders = self._folders_list.get_folders()
