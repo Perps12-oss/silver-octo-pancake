@@ -130,6 +130,12 @@ class VirtualFileGrid(tk.Canvas):
                  **kw) -> None:
         kw.setdefault("bg", _WHITE)
         kw.setdefault("highlightthickness", 0)
+        # Captured up-front so ttk.Scrollbar can drive us via configure().
+        # See configure() + _render() — we fire this ourselves because
+        # native Canvas scrolling is bypassed by our own _scroll_y model.
+        self._yscrollcommand: Optional[Callable[[str, str], None]] = kw.pop(
+            "yscrollcommand", None
+        )
         super().__init__(parent, **kw)
         self._rows:         List[Dict]     = []
         self._checked:      Set[int]       = set()       # row indices
@@ -140,17 +146,104 @@ class VirtualFileGrid(tk.Canvas):
         self._on_open_group = on_open_group
         self._total_h:      int            = 0
 
-        self.bind("<MouseWheel>",    self._on_scroll)
+        self.bind("<MouseWheel>",    self._on_scroll)           # Win / macOS
+        self.bind("<Button-4>",      self._on_scroll_linux)     # Linux up
+        self.bind("<Button-5>",      self._on_scroll_linux)     # Linux down
         self.bind("<Button-1>",      self._on_click)
         self.bind("<Double-Button-1>", self._on_dbl)
         self.bind("<Configure>",     lambda _e: self._render())
         self.bind("<space>",         self._on_space)
         self.bind("<Up>",            lambda _e: self._move_sel(-1))
         self.bind("<Down>",          lambda _e: self._move_sel(1))
+        self.bind("<Prior>",         lambda _e: self._move_sel(-self._page_size()))
+        self.bind("<Next>",          lambda _e: self._move_sel( self._page_size()))
+        self.bind("<Home>",          self._on_home)
+        self.bind("<End>",           self._on_end)
         self.bind("<Return>",        lambda _e: self._open_selected())
         self.bind("<Control-a>",     lambda _e: self._check_all())
         self.bind("<Control-A>",     lambda _e: self._check_all())
         self.bind("<Delete>",        lambda _e: self._mark_selected_delete())
+
+    # ------------------------------------------------------------------
+    # Scroll model — unified for scrollbar + mouse wheel + keyboard.
+    #
+    # Canvas's native yview is bypassed: our _render draws row items at
+    # y = i*ROW_H - self._scroll_y, so the only thing that matters is
+    # _scroll_y. Both ttk.Scrollbar drags AND mouse-wheel events route
+    # through _scroll_to / _scroll_by; _render then pushes the current
+    # fractional view back to the scrollbar via _yscrollcommand so the
+    # thumb tracks correctly regardless of input channel.
+
+    def configure(self, cnf=None, **kw):  # type: ignore[override]
+        merged: Dict = dict(cnf) if isinstance(cnf, dict) else {}
+        merged.update(kw)
+        if "yscrollcommand" in merged:
+            self._yscrollcommand = merged.pop("yscrollcommand")
+        if not merged:
+            return super().configure()
+        return super().configure(**merged)
+
+    config = configure  # Tk alias
+
+    def yview(self, *args):  # type: ignore[override]
+        if not args:
+            return self._yview_fractions()
+        op = args[0]
+        if op == "moveto" and len(args) >= 2:
+            try:
+                fraction = float(args[1])
+            except (TypeError, ValueError):
+                return None
+            self._scroll_to(int(fraction * self._total_h))
+        elif op == "scroll" and len(args) >= 3:
+            try:
+                number = int(args[1])
+            except (TypeError, ValueError):
+                return None
+            what = str(args[2])
+            if what.startswith("page"):
+                self._scroll_by_page(number)
+            else:
+                self._scroll_by(number * self.ROW_H)
+        return None
+
+    def _yview_fractions(self) -> tuple:
+        if self._total_h <= 0:
+            return (0.0, 1.0)
+        h = self.winfo_height() or 400
+        top = max(0.0, min(1.0, self._scroll_y / self._total_h))
+        bot = max(0.0, min(1.0, (self._scroll_y + h) / self._total_h))
+        return (top, bot)
+
+    def _scroll_to(self, y_px: int) -> None:
+        h = self.winfo_height() or 400
+        max_y = max(0, self._total_h - h)
+        self._scroll_y = max(0, min(max_y, int(y_px)))
+        self._render()
+
+    def _scroll_by(self, delta_px: int) -> None:
+        self._scroll_to(self._scroll_y + int(delta_px))
+
+    def _scroll_by_page(self, pages: int) -> None:
+        h = self.winfo_height() or 400
+        page_px = max(self.ROW_H, h - self.ROW_H)
+        self._scroll_by(int(pages) * page_px)
+
+    def _page_size(self) -> int:
+        h = self.winfo_height() or 400
+        return max(1, h // self.ROW_H - 1)
+
+    def _on_home(self, _event=None) -> str:
+        if self._rows:
+            self._selected_idx = 0
+        self._scroll_to(0)
+        return "break"
+
+    def _on_end(self, _event=None) -> str:
+        if self._rows:
+            self._selected_idx = len(self._rows) - 1
+        self._scroll_to(self._total_h)
+        return "break"
 
     # ------------------------------------------------------------------
     # Data
@@ -254,18 +347,40 @@ class VirtualFileGrid(tk.Canvas):
                                      text=folder, fill=fg, anchor="w",
                                      font=("Segoe UI", 10), tags="row")
 
-        # Scrollbar region
-        self.configure(scrollregion=(0, 0, w, self._total_h))
+        # Keep Tk's native scrollregion clamped to the viewport so native
+        # Canvas scrolling (which we intentionally bypass) can never drift
+        # away from the drawn row range. All scrolling now flows through
+        # yview() / _scroll_to / _scroll_by on our _scroll_y model.
+        h = self.winfo_height() or 400
+        super().configure(scrollregion=(0, 0, w, h))
+
+        # Push current fractional view to the scrollbar so the thumb
+        # tracks mouse-wheel and keyboard-driven scrolling, not only
+        # scrollbar drags.
+        if self._yscrollcommand is not None:
+            top, bot = self._yview_fractions()
+            try:
+                self._yscrollcommand(f"{top}", f"{bot}")
+            except tk.TclError:
+                pass
 
     # ------------------------------------------------------------------
     # Interaction
 
     def _on_scroll(self, event) -> None:
-        h = self.winfo_height()
-        max_scroll = max(0, self._total_h - h)
-        self._scroll_y = max(0, min(max_scroll,
-                                    self._scroll_y - event.delta // 2))
-        self._render()
+        # Windows: event.delta is a multiple of 120 per notch.
+        # macOS:   event.delta is a small signed integer per notch.
+        # Scroll 3 rows per notch either way for a snappy feel.
+        if abs(event.delta) >= 120:
+            notches = -event.delta // 120
+        else:
+            notches = -1 if event.delta > 0 else 1
+        self._scroll_by(notches * self.ROW_H * 3)
+
+    def _on_scroll_linux(self, event) -> None:
+        # X11: <Button-4>/<Button-5> deliver wheel events with delta=0.
+        direction = -1 if getattr(event, "num", 0) == 4 else 1
+        self._scroll_by(direction * self.ROW_H * 3)
 
     def _row_at_y(self, y: int) -> Optional[int]:
         idx = (y + self._scroll_y) // self.ROW_H
