@@ -50,9 +50,23 @@ class AppShell(CTk):
 
     def __init__(self) -> None:
         super().__init__()
+        self._bootstrap_tkdnd()
         self._orchestrator = ScanOrchestrator()
         self._setup_window()
         self._build_ui()
+
+    def _bootstrap_tkdnd(self) -> None:
+        # tkinterdnd2 monkey-patches drop_target_register / dnd_bind onto
+        # tkinter.BaseWidget at import time, but those methods only succeed
+        # once the native tkdnd Tcl package has been loaded into this
+        # interpreter. TkinterDnD.Tk does that inside its __init__; since
+        # AppShell subclasses CTk (which does not), we load it here so that
+        # any descendant widget can become a drop target.
+        try:
+            from tkinterdnd2 import TkinterDnD
+            self.TkdndVersion = TkinterDnD._require(self)
+        except Exception as e:
+            _log.debug("tkinterdnd2 unavailable, drag-and-drop disabled: %s", e)
 
     # ------------------------------------------------------------------
     # Window setup

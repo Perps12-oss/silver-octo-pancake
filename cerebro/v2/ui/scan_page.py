@@ -84,6 +84,7 @@ class _FolderTree(tk.Frame):
         super().__init__(master, **kwargs)
         self.pack_propagate(False)
         self._selected_path: Optional[Path] = None
+        self._on_activate: Optional[Callable[[Path], None]] = None
         self._t: dict = t
         self._build()
         self.apply_theme(t)
@@ -128,6 +129,7 @@ class _FolderTree(tk.Frame):
 
         self._tree.bind("<<TreeviewOpen>>", self._on_open)
         self._tree.bind("<<TreeviewSelect>>", self._on_select)
+        self._tree.bind("<Double-Button-1>", self._on_double_click)
 
     def _apply_tree_style(self, t: dict) -> None:
         panel  = t.get("bg2",        _WHITE)
@@ -244,6 +246,28 @@ class _FolderTree(tk.Frame):
 
     def get_selected(self) -> Optional[Path]:
         return self._selected_path
+
+    def on_activate(self, cb: Callable[[Path], None]) -> None:
+        """Register a handler invoked when a tree row is double-clicked."""
+        self._on_activate = cb
+
+    def _on_double_click(self, event) -> None:
+        # Ignore double-clicks on the disclosure indicator so single-click
+        # expand/collapse keeps working; activate only on the row body.
+        region = self._tree.identify_region(event.x, event.y)
+        if region not in ("tree", "cell"):
+            return None
+        iid = self._tree.identify_row(event.y)
+        if not iid:
+            return None
+        vals = self._tree.item(iid, "values")
+        if not vals or not self._on_activate:
+            return None
+        try:
+            self._on_activate(Path(vals[0]))
+        except Exception:
+            _log.exception("tree double-click activate handler failed")
+        return "break"
 
 
 # ===========================================================================
@@ -464,31 +488,7 @@ class _SearchFoldersList(tk.Frame):
         bg  = self._t.get("bg",      _WHITE)
         nav = self._t.get("nav_bar", _NAVY_BAR)
 
-        # --- Action strip pinned to bottom ---
-        self._strip_sep = tk.Frame(self, bg=self._t.get("border", _BORDER), height=1)
-        self._strip_sep.pack(side="bottom", fill="x")
-        self._action_strip = tk.Frame(self, bg=nav, height=36)
-        self._action_strip.pack(side="bottom", fill="x")
-        self._action_strip.pack_propagate(False)
-        self._strip_btns: List[tk.Button] = []
-        for text, cmd in [
-            ("ADD FOLDERS", self._add_folders),
-            ("PASTE PATH",  self.paste_path),
-            ("CLEAR ALL",   self.clear_all),
-        ]:
-            b = tk.Button(
-                self._action_strip, text=text, bg=nav,
-                fg=_WHITE, font=("Segoe UI", 9), relief="flat",
-                padx=10, pady=0, cursor="hand2",
-                activebackground="#3A6BAE", activeforeground=_WHITE,
-                command=cmd,
-            )
-            b.pack(side="left", fill="y", padx=1)
-            b.bind("<Enter>", lambda _e, w=b: w.configure(bg="#3A6BAE"))
-            b.bind("<Leave>", lambda _e, w=b, n=nav: w.configure(bg=n))
-            self._strip_btns.append(b)
-
-        # --- Scrollable area ---
+        # --- Scrollable area fills the whole panel ---
         self._canvas = tk.Canvas(self, bg=bg, highlightthickness=0)
         vsb = ttk.Scrollbar(self, orient="vertical", command=self._canvas.yview)
         self._canvas.configure(yscrollcommand=vsb.set)
@@ -504,9 +504,36 @@ class _SearchFoldersList(tk.Frame):
             lambda e: self._canvas.yview_scroll(-1 * (e.delta // 120), "units"),
         )
 
-        self._drop_zone = _DropZone(self._inner, t=self._t, on_add=self._add_folders)
-        self._drop_zone.pack(expand=True, fill="both")
+        # Drop zone — always visible, sits centered in the panel.
+        self._drop_zone = _DropZone(self._inner, t=self._t, on_add=self._browse)
+        self._drop_zone.pack(expand=True, fill="both", pady=(8, 0))
         self._drop_zone.try_register_dnd(self._on_dnd_drop)
+
+        # Centered action strip directly under the drop zone (not pinned
+        # to the panel bottom). Rows get packed above the drop zone via
+        # `before=self._drop_zone`, so the buttons stay with it at the
+        # visual middle of the panel and never get crowded by rows.
+        self._action_strip = tk.Frame(self._inner, bg=bg)
+        self._action_strip.pack(fill="x", pady=(8, 16))
+        self._action_center = tk.Frame(self._action_strip, bg=bg)
+        self._action_center.pack(anchor="center")
+        self._strip_btns: List[tk.Button] = []
+        for text, cmd in [
+            ("BROWSE\u2026",  self._browse),
+            ("PASTE PATH",    self.paste_path),
+            ("CLEAR ALL",     self.clear_all),
+        ]:
+            b = tk.Button(
+                self._action_center, text=text, bg=nav,
+                fg=_WHITE, font=("Segoe UI", 9, "bold"), relief="flat",
+                padx=16, pady=6, cursor="hand2",
+                activebackground="#3A6BAE", activeforeground=_WHITE,
+                command=cmd,
+            )
+            b.pack(side="left", padx=4)
+            b.bind("<Enter>", lambda _e, w=b: w.configure(bg="#3A6BAE"))
+            b.bind("<Leave>", lambda _e, w=b, n=nav: w.configure(bg=n))
+            self._strip_btns.append(b)
 
     def _on_dnd_drop(self, data: str) -> None:
         """Parse tkinterdnd2 brace-wrapped paths and add any valid directories."""
@@ -517,13 +544,8 @@ class _SearchFoldersList(tk.Frame):
             if p.is_dir():
                 self.add(p)
 
-    def _add_folders(self) -> None:
-        """ADD FOLDERS: use tree selection or fall back to file dialog."""
-        if self._tree is not None:
-            sel = self._tree.get_selected()
-            if sel:
-                self.add(sel)
-                return
+    def _browse(self) -> None:
+        """Open the native Explorer folder-picker and add the chosen folder."""
         path = filedialog.askdirectory(title="Select folder to scan")
         if path:
             self.add(Path(path))
@@ -536,8 +558,8 @@ class _SearchFoldersList(tk.Frame):
         self.configure(bg=bg)
         self._canvas.configure(bg=bg)
         self._inner.configure(bg=bg)
-        self._action_strip.configure(bg=nav)
-        self._strip_sep.configure(bg=t.get("border", _BORDER))
+        self._action_strip.configure(bg=bg)
+        self._action_center.configure(bg=bg)
         for b in self._strip_btns:
             b.configure(bg=nav, fg=_WHITE, activebackground=acc)
             b.bind("<Enter>", lambda _e, w=b, a=acc: w.configure(bg=a))
@@ -567,7 +589,6 @@ class _SearchFoldersList(tk.Frame):
         if path in self._folders:
             return
         self._folders.append(path)
-        self._drop_zone.pack_forget()
         self._render_row(path)
         if self._on_changed:
             self._on_changed(list(self._folders))
@@ -576,7 +597,9 @@ class _SearchFoldersList(tk.Frame):
         t  = self._t
         bg = t.get("bg", _WHITE)
         row = tk.Frame(self._inner, bg=bg)
-        row.pack(fill="x", padx=8, pady=2)
+        # Rows stack above the drop zone so the drop zone + action buttons
+        # remain together in the visual middle of the panel.
+        row.pack(fill="x", padx=8, pady=2, before=self._drop_zone)
 
         icon = tk.Label(row, text="📁", bg=bg, fg="#F0A500",
                         font=("Segoe UI", 12))
@@ -605,8 +628,6 @@ class _SearchFoldersList(tk.Frame):
                 r["row"].destroy()
                 self._rows.remove(r)
                 break
-        if not self._folders:
-            self._drop_zone.pack(expand=True, fill="both")
         if self._on_changed:
             self._on_changed(list(self._folders))
 
@@ -615,18 +636,70 @@ class _SearchFoldersList(tk.Frame):
         for r in self._rows:
             r["row"].destroy()
         self._rows.clear()
-        self._drop_zone.pack(expand=True, fill="both")
         if self._on_changed:
             self._on_changed([])
 
     def paste_path(self) -> None:
+        """Paste one or more folder paths from the clipboard.
+
+        Handles the real-world shapes users actually copy:
+          - Windows "Copy as path" wraps the path in double quotes.
+          - Multi-select "Copy as path" produces one quoted path per line.
+          - Users sometimes paste a file path; we add its parent folder.
+        Shows a short info popup if nothing usable was found, instead of
+        silently doing nothing.
+        """
         try:
             raw = self.clipboard_get()
-            p = Path(raw.strip())
-            if p.is_dir():
-                self.add(p)
-        except Exception:
-            pass
+        except tk.TclError:
+            raw = ""
+        if not raw:
+            try:
+                from tkinter import messagebox
+                messagebox.showinfo(
+                    "Paste Path",
+                    "Clipboard is empty or does not contain text.",
+                )
+            except tk.TclError:
+                pass
+            return
+
+        added = 0
+        seen: set = set()
+        for line in raw.splitlines():
+            candidate = line.strip().strip('"').strip("'").strip()
+            if not candidate or candidate in seen:
+                continue
+            seen.add(candidate)
+            try:
+                p = Path(candidate)
+            except (OSError, ValueError):
+                continue
+            target: Optional[Path] = None
+            try:
+                if p.is_dir():
+                    target = p
+                elif p.is_file():
+                    target = p.parent
+            except OSError:
+                target = None
+            if target is not None:
+                before = len(self._folders)
+                self.add(target)
+                if len(self._folders) > before:
+                    added += 1
+
+        if added == 0:
+            try:
+                from tkinter import messagebox
+                messagebox.showinfo(
+                    "Paste Path",
+                    "Clipboard does not contain a valid folder or file path.\n\n"
+                    "Tip: in Windows Explorer, right-click a folder and choose "
+                    "\u201cCopy as path\u201d, then try again.",
+                )
+            except tk.TclError:
+                pass
 
     def get_folders(self) -> List[Path]:
         return list(self._folders)
@@ -688,13 +761,18 @@ class _DropZone(tk.Frame):
         self._draw()
 
     def try_register_dnd(self, on_drop: Callable[[str], None]) -> None:
-        """Register as DnD drop target if tkinterdnd2 is available; silent no-op otherwise."""
+        """Register as DnD drop target if tkinterdnd2 is available; logs at debug otherwise.
+
+        Requires `TkinterDnD._require(root)` to have been called during app
+        startup (see AppShell._bootstrap_tkdnd); otherwise the underlying
+        tkdnd Tcl commands are not loaded and registration will fail.
+        """
         try:
             import tkinterdnd2 as _dnd  # type: ignore[import]
             self._canvas.drop_target_register(_dnd.DND_FILES)  # type: ignore[attr-defined]
             self._canvas.dnd_bind("<<Drop>>", lambda e: on_drop(e.data))  # type: ignore[attr-defined]
-        except (ImportError, AttributeError, tk.TclError):
-            pass
+        except (ImportError, AttributeError, tk.TclError) as e:
+            _log.debug("drop-zone DnD registration failed: %s", e)
 
 
 class _SuggestionsFooter(tk.Frame):
@@ -807,6 +885,7 @@ class ScanPage(tk.Frame):
 
         self._folders_list = _SearchFoldersList(self._content, tree=self._tree)
         self._folders_list.place(relwidth=1, relheight=1)
+        self._tree.on_activate(self._folders_list.add)
 
         self._progress_view = ScanInProgressView(
             self._content, on_cancel=self._stop_scan

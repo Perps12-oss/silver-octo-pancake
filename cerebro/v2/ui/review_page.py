@@ -446,24 +446,36 @@ class ReviewPage(tk.Frame):
         self._preview = _PreviewArea(self._left_col)
         self._preview.pack(fill="both", expand=True)
 
-        # Action buttons bar
-        self._acts_bar = tk.Frame(self._left_col, bg=_WHITE, height=44)
+        # Action buttons bar — filled, color-coded so the main actions
+        # (Keep / Delete / Open) stand out against the white preview pane
+        # instead of blending in as ghosted outlines.
+        self._acts_bar = tk.Frame(self._left_col, bg=_WHITE, height=60)
         self._acts_bar.pack(fill="x", side="bottom")
         self._acts_bar.pack_propagate(False)
         tk.Frame(self._acts_bar, bg=_BORDER, height=1).pack(side="top", fill="x")
+        self._acts_center = tk.Frame(self._acts_bar, bg=_WHITE)
+        self._acts_center.pack(anchor="center", expand=True)
 
-        def _abtn(text, cmd, border=_DIMGRAY):
-            b = tk.Button(self._acts_bar, text=text, command=cmd,
-                          bg=_WHITE, fg="#333333",
-                          font=("Segoe UI", 10), relief="flat",
-                          cursor="hand2", padx=14, pady=6,
-                          highlightbackground=border, highlightthickness=1)
-            b.pack(side="left", padx=6, pady=4)
+        self._act_btn_specs: List[dict] = []
+
+        def _abtn(text, cmd, bg_color, hover_color):
+            b = tk.Button(
+                self._acts_center, text=text, command=cmd,
+                bg=bg_color, fg=_WHITE,
+                font=("Segoe UI", 10, "bold"), relief="flat",
+                cursor="hand2", padx=18, pady=8,
+                activebackground=hover_color, activeforeground=_WHITE,
+                borderwidth=0, highlightthickness=0,
+            )
+            b.pack(side="left", padx=6, pady=10)
+            b.bind("<Enter>", lambda _e, w=b, c=hover_color: w.configure(bg=c))
+            b.bind("<Leave>", lambda _e, w=b, c=bg_color:   w.configure(bg=c))
+            self._act_btn_specs.append({"btn": b, "bg": bg_color, "hover": hover_color})
             return b
 
-        _abtn("Keep this one",      self._keep_current)
-        _abtn("Delete as duplicate", self._delete_current, border=_RED)
-        _abtn("Open in Explorer",   self._open_in_explorer)
+        _abtn("\u2713 Keep this one",       self._keep_current,     "#2E8B57", "#3FA56B")
+        _abtn("\u2716 Delete as duplicate", self._delete_current,   _RED,      "#C0392B")
+        _abtn("\u270E Open in Explorer",    self._open_in_explorer, "#2E75B6", "#3A87CC")
 
         # ── Right column ─────────────────────────────────────────────
         self._right_col = tk.Frame(self, bg=_F8)
@@ -491,12 +503,23 @@ class ReviewPage(tk.Frame):
         self._breadcrumb.apply_theme(t)
         self._preview.apply_theme(t)
         self._acts_bar.configure(bg=bg)
+        self._acts_center.configure(bg=bg)
+        # Keep the colored Keep/Delete/Open buttons vivid across theme
+        # changes: only restyle the container + the thin top separator
+        # frame, not the action buttons themselves.
         for w in self._acts_bar.winfo_children():
             try:
-                if isinstance(w, tk.Button):
-                    w.configure(bg=bg, fg=fg, activebackground=bg)
-                else:
+                if w is self._acts_center:
+                    continue
+                if isinstance(w, tk.Frame):
                     w.configure(bg=br)
+            except tk.TclError:
+                pass
+        for spec in self._act_btn_specs:
+            try:
+                spec["btn"].configure(bg=spec["bg"], fg=_WHITE,
+                                       activebackground=spec["hover"],
+                                       activeforeground=_WHITE)
             except tk.TclError:
                 pass
         self._copy_list.apply_theme(t)
