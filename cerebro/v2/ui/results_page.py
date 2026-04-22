@@ -62,6 +62,26 @@ _FILTER_EXTS: Dict[str, Optional[Set[str]]] = {
     "archives": _EXT_ARCH,
 }
 
+_EXT_ALL_KNOWN: Set[str] = (
+    _EXT_MUSIC | _EXT_PIC | _EXT_VID | _EXT_DOC | _EXT_ARCH
+)
+
+
+def classify_file(ext: str) -> str:
+    """Return the Results-filter bucket for a file extension.
+
+    Buckets: ``pictures``, ``music``, ``videos``, ``documents``, ``archives``,
+    ``other``. Input is the extension including the leading dot (e.g.
+    ``'.jpg'``); comparison is case-insensitive.
+    """
+    e = (ext or "").lower()
+    if e in _EXT_PIC:   return "pictures"
+    if e in _EXT_MUSIC: return "music"
+    if e in _EXT_VID:   return "videos"
+    if e in _EXT_DOC:   return "documents"
+    if e in _EXT_ARCH:  return "archives"
+    return "other"
+
 
 def _fmt_size(n: int) -> str:
     if n < 1024:       return f"{n} B"
@@ -649,16 +669,22 @@ class _ActionToolbar(tk.Frame):
 # ===========================================================================
 
 class _FilterListBar(tk.Frame):
-    """File-type filter as a single horizontal list of labels (no boxes or tab fills)."""
+    """File-type filter as a single horizontal list of labels (no boxes or tab fills).
+
+    Each tab label includes a live count, e.g. ``Pictures (3,412)``.
+    Tabs whose count is zero are visually muted and non-clickable; the
+    ``All`` tab is always clickable regardless of count.
+    """
 
     H = 28
     TABS = [
         ("all", "All"),
-        ("music", "Music"),
         ("pictures", "Pictures"),
+        ("music", "Music"),
         ("videos", "Videos"),
         ("documents", "Documents"),
         ("archives", "Archives"),
+        ("other", "Other"),
     ]
 
     def __init__(self, master, on_filter: Callable[[str], None], **kw) -> None:
@@ -670,6 +696,8 @@ class _FilterListBar(tk.Frame):
         self._active = "all"
         self._lbls: Dict[str, tk.Label] = {}
         self._seps: List[tk.Label] = []
+        self._counts: Dict[str, int] = {k: 0 for k, _ in self.TABS}
+        self._disabled: Set[str] = set()
         self._t_theme: dict = {}
         self._build()
 
@@ -717,12 +745,37 @@ class _FilterListBar(tk.Frame):
             sep.configure(bg=bg, fg=br)
         self._set_active(self._active)
 
+    def set_counts(self, counts: Dict[str, int]) -> None:
+        """Update per-bucket counts and re-render tab labels.
+
+        Zero-count tabs (except ``all``) become muted and unclickable.
+        """
+        for key, _ in self.TABS:
+            self._counts[key] = int(counts.get(key, 0))
+        self._disabled = {
+            k for k, _ in self.TABS
+            if k != "all" and self._counts.get(k, 0) == 0
+        }
+        for key, _ in self.TABS:
+            self._lbls[key].configure(
+                text=self._label_text(key),
+                cursor="arrow" if key in self._disabled else "hand2",
+            )
+        self._set_active(self._active)
+
+    def _label_text(self, key: str) -> str:
+        base = next(t for k, t in self.TABS if k == key)
+        count = self._counts.get(key, 0)
+        return f"{base} ({count:,})"
+
     def _click(self, key: str) -> None:
+        if key in self._disabled:
+            return
         self._set_active(key)
         self._on_filter(key)
 
     def _hover(self, key: str, inside: bool) -> None:
-        if key == self._active:
+        if key in self._disabled or key == self._active:
             return
         t = self._t_theme
         bg = t.get("bg", _WHITE)
@@ -739,11 +792,19 @@ class _FilterListBar(tk.Frame):
         bg = t.get("bg", _WHITE)
         acc = t.get("accent", _NAVY_MID)
         fg2 = t.get("fg2", _GRAY)
+        fg_mute = t.get("fg_muted", _DIMGRAY)
         for k, w in self._lbls.items():
-            on = k == key
+            disabled = k in self._disabled
+            on = (k == key) and not disabled
+            if disabled:
+                fg = fg_mute
+            elif on:
+                fg = acc
+            else:
+                fg = fg2
             w.configure(
                 bg=bg,
-                fg=acc if on else fg2,
+                fg=fg,
                 font=("Segoe UI", 10, "bold") if on else ("Segoe UI", 10),
             )
 
@@ -850,12 +911,32 @@ class ResultsPage(tk.Frame):
         self._groups = groups
         self._empty_lbl.place_forget()
         self._all_rows = self._build_rows(groups)
+        self._refresh_type_counts()
         self._apply_filter(self._filter)
 
         total_files = sum(len(g.files) for g in groups)
         dupes       = sum(max(0, len(g.files) - 1) for g in groups)
         recoverable = sum(g.reclaimable for g in groups)
         self._stats_bar.update(total_files, dupes, recoverable)
+
+    def _refresh_type_counts(self) -> None:
+        """Recompute per-bucket file counts and push to the filter bar.
+
+        If the currently-active filter has dropped to zero (e.g. after a delete
+        removed the last Pictures file), fall back to ``all`` so the user is
+        never stranded on a muted, non-clickable tab.
+        """
+        counts: Dict[str, int] = {
+            "all": len(self._all_rows),
+            "pictures": 0, "music": 0, "videos": 0,
+            "documents": 0, "archives": 0, "other": 0,
+        }
+        for r in self._all_rows:
+            counts[classify_file(r.get("extension", ""))] += 1
+        self._filter_bar.set_counts(counts)
+        if self._filter != "all" and counts.get(self._filter, 0) == 0:
+            self._filter = "all"
+            self._filter_bar._set_active("all")
 
     def _build_rows(self, groups: List[DuplicateGroup]) -> List[Dict]:
         rows = []
@@ -880,11 +961,20 @@ class ResultsPage(tk.Frame):
 
     def _apply_filter(self, key: str) -> None:
         self._filter = key
-        exts = _FILTER_EXTS.get(key)
-        if exts is None:
-            rows = self._all_rows
+        if key == "other":
+            rows = [
+                r for r in self._all_rows
+                if (r.get("extension", "") or "").lower() not in _EXT_ALL_KNOWN
+            ]
         else:
-            rows = [r for r in self._all_rows if r.get("extension", "") in exts]
+            exts = _FILTER_EXTS.get(key)
+            if exts is None:
+                rows = self._all_rows
+            else:
+                rows = [
+                    r for r in self._all_rows
+                    if (r.get("extension", "") or "").lower() in exts
+                ]
         self._grid.load(rows)
 
     # ------------------------------------------------------------------
@@ -963,11 +1053,14 @@ class ResultsPage(tk.Frame):
         self.after(0, lambda: self._remove_paths(deleted))
 
     def _remove_paths(self, paths: Set[str]) -> None:
-        self._grid._rows = [r for r in self._grid._rows if r["path"] not in paths]
-        self._all_rows   = [r for r in self._all_rows   if r["path"] not in paths]
+        self._all_rows = [r for r in self._all_rows if r["path"] not in paths]
         self._grid._checked.clear()
-        self._grid._total_h = len(self._grid._rows) * VirtualFileGrid.ROW_H
-        self._grid._render()
+        # Recount first; may auto-revert active filter to "all" if the current
+        # bucket just dropped to zero, so the user isn't stranded on a muted
+        # tab. Re-apply the (possibly updated) active filter to repopulate the
+        # grid from the pruned _all_rows.
+        self._refresh_type_counts()
+        self._apply_filter(self._filter)
         self._grid._fire_check_change()
 
     def _move_checked(self) -> None:
