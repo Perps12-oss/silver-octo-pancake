@@ -965,10 +965,12 @@ Every edit to this file requires a line here.
   and Step 5 (bug1 investigation doc) already satisfied in-tree.
 - **2026-04-22** — Phase 8.3: `cerebro/core/SCAN_PATHS.md` relocated to
   `docs/architecture/scan_paths.md`; all in-repo plan references updated.
-- **2026-04-22** — Phase 8.5 automated subset: ``scripts/post_v1_audit_verify.py``
-  + ``tests/test_post_v1_audit_verification.py`` + ``tests/test_group_invariants.py``
-  + tracked ``docs/releases/v1.1.0/final_verification.log``. Manual 5-root bars
-  still operator-owned before tag ``v1.1.0-post-audit``.
+- **2026-04-22** — Phase 8.5 automated subset: ``scripts/post_v1_audit_verify.py``,
+  ``tests/test_post_v1_audit_verification.py``,
+  ``tests/test_group_invariants.py``,
+  tracked ``docs/releases/v1.1.0/final_verification.log`` (see git log on
+  ``fix/post-v1-audit``). Manual 5-root bars still operator-owned before tag
+  ``v1.1.0-post-audit``.
 
 ---
 
