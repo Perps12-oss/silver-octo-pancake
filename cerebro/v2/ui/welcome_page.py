@@ -349,3 +349,11 @@ class WelcomePage(tk.Frame):
         for w in self.winfo_children():
             w.destroy()
         self._build()
+
+    def on_show(self) -> None:
+        """Called by AppShell whenever the Welcome tab is activated.
+
+        Ensures the stats row reflects the latest DB state even when the user
+        navigates away and back without a fresh scan completing in between.
+        """
+        self.refresh()

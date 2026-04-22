@@ -7,6 +7,7 @@ Right (rest):   mode bar · config sub-tabs · action bar.
 """
 from __future__ import annotations
 
+import logging
 import os
 import string
 import threading
@@ -15,6 +16,8 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, ttk
 from typing import Any, Callable, Dict, List, Optional
+
+_log = logging.getLogger(__name__)
 
 try:
     import customtkinter as ctk
@@ -908,9 +911,32 @@ class ScanPage(tk.Frame):
         self._mode_bar.set_scanning(False)
         self._hide_progress()
 
-        if state == ScanState.COMPLETED and self._on_scan_complete:
+        if state == ScanState.COMPLETED:
             results = self._orchestrator.get_results()
-            self._on_scan_complete(results)
+            # Bug: scan counter stuck at 49. Investigation
+            # (docs/bug-investigations/phase3_guard_order.log) correctly
+            # diagnosed the INSERT never firing; the log's canonical-chokepoint
+            # line was MainWindow/HistoryRecorder, but MainWindow was retired
+            # in 39a332c and the AppShell/ScanPage path was left with no
+            # history recording at all. Broad catch + logger.exception so any
+            # future failure surfaces once instead of being swallowed.
+            try:
+                from cerebro.v2.ui.scan_history_dialog import record_scan
+
+                folders = self._folders_list.get_folders()
+                record_scan(
+                    mode=self._current_mode,
+                    folders=[str(f) for f in folders],
+                    groups_found=len(results),
+                    files_found=sum(len(g.files) for g in results),
+                    bytes_reclaimable=sum(g.reclaimable for g in results),
+                    duration_seconds=max(0.0, time.time() - self._scan_start_time),
+                )
+            except Exception:
+                _log.exception("Failed to record scan history entry")
+
+            if self._on_scan_complete:
+                self._on_scan_complete(results)
 
     def _show_progress(self) -> None:
         self._folders_list.place_forget()
