@@ -5,7 +5,7 @@
 **Reviewer:** [senior advisor]
 **Branch:** fix/post-v1-audit
 **Target tag:** v1.1.0-post-audit
-**Last updated:** 2026-04-22
+**Last updated:** 2026-04-22 (automated Phase 8.5 harness landed)
 
 ---
 
@@ -59,16 +59,16 @@ implementation commit lands.
 | 1     | CLOSURE COMPLETE             | 65ce5d1, a8bb998 (+ plan closure commit) |
 | 1.5   | MERGED INTO PHASE 1          | —                                      |
 | 2     | CLOSURE COMPLETE             | b0e94d6, 835bc68, 434fa7f (+ closure doc) |
-| 3     | NOT STARTED                  | —                                      |
-| 4     | NOT STARTED                  | —                                      |
-| 5     | NOT STARTED                  | —                                      |
-| 6     | NOT STARTED                  | —                                      |
-| 7     | NOT STARTED                  | —                                      |
-| 8     | IN PROGRESS (8.1–8.4)        | see recent commits on fix/post-v1-audit |
+| 3     | COMPLETE (on branch)         | see git log fix/post-v1-audit          |
+| 4     | COMPLETE (on branch)         | see git log fix/post-v1-audit          |
+| 5     | COMPLETE (on branch)         | see git log fix/post-v1-audit          |
+| 6     | COMPLETE (on branch)         | see git log fix/post-v1-audit          |
+| 7     | COMPLETE (on branch)         | see git log fix/post-v1-audit          |
+| 8     | AUTOMATED COMPLETE           | 8.1–8.4 landed; 8.5 manual + 8.6–8.7 pending |
 
 ---
 
-# PHASE 1 — Instrument All Scan Paths (CLOSURE PENDING)
+# PHASE 1 — Instrument All Scan Paths (CLOSURE COMPLETE)
 
 ## Status
 
@@ -142,7 +142,7 @@ One commit on `fix/post-v1-audit`. Scope:
 
 ---
 
-# PHASE 2 — Fix Bug 1 (CLOSURE PENDING)
+# PHASE 2 — Fix Bug 1 (CLOSURE COMPLETE)
 
 ## Status
 
@@ -807,20 +807,23 @@ AFTER:
 
 - Delete `diagnostics/_phase2_cache_experiment.py` outright
   (git has history; `scripts/dev/` retention rejected).
+  **2026-04-22:** file not present in-tree — nothing to delete.
 - Delete `scripts/dev/phase1_scan_runner.py` IF no longer needed
   (keep if there's an argument for re-runnability).
+  **2026-04-22:** **retained** for reproducible DIAG-era reruns (now writes
+  ``[Turbo] summary:`` lines post–Phase 8.1).
 - Delete `diagnostics/*.log` files (gitignored; remove on-disk
-  clutter).
+  clutter). **Operator-owned** (local ``diagnostics/`` only).
 
 ### 8.3 — Documentation Relocation
 
 - ~~Move `SCAN_PATHS.md` → `docs/architecture/scan_paths.md`~~ **Done (Phase 8.3)**
 - Confirm `docs/bug-investigations/` contains:
-  - `bug1-canonical-path-dedup.md`
-  - `phase3_guard_order.log`
-  - `phase5_pre_measure.md`
+  - `bug1-canonical-path-dedup.md` — **present**
+  - `phase3_guard_order.log` — **present**
+  - `phase5_pre_measure.md` — **present** (retroactive artifact; Phase 5 shipped)
 - Confirm `docs/backlog/phase5-results-virtualization.md` exists
-  IFF Phase 5 was deferred.
+  IFF Phase 5 was deferred. **N/A** — Phase 5 was not deferred.
 
 ### 8.4 — Code Comments Above Defensive Structures
 
@@ -849,7 +852,8 @@ regress, phase + date context.
   > Catches any self-duplicate regression not caught by dedupe_roots
   > (fix: 434fa7f, Phase 2c, 2026-04-20; ported to all paths in
   > [fix(phase2d) SHA]).
-  > Regression indicator: [DIAG:GUARD] regressions > 0 at any scan.
+  > Regression indicator: DEBUG log ``[DIAG:GUARD]`` shows regressions > 0;
+  > or ``CEREBRO_STRICT=1`` raises during emit.
   > Strict mode via CEREBRO_STRICT=1 raises instead of logging.
 
 ### 8.5 — Final Verification (ALL must pass before tag)
@@ -859,22 +863,30 @@ Capture verification log to
 `docs/releases/v1.1.0/final_verification.log` (tracked path; no
 `git add -f`).
 
-- [ ] No Phase 1→2 count inversion
+**Automated subset (2026-04-22)** — run `python scripts/post_v1_audit_verify.py`
+from repo root; it appends/writes the log and runs pytest + smoke scripts.
+Verified in CI/local:
+
+- [x] ``[ROOT_DEDUP]`` string retained in ``turbo_scanner.py`` (static check)
+- [x] Forbidden ``[DIAG:DISCOVERY|REDUCE|PAIR|SUMMARY|EMIT|TURBO:]`` absent from
+      all ``cerebro/**/*.py`` (pytest)
+- [x] ``[DIAG:GUARD]`` only via ``logger.debug`` in ``turbo_scanner.py`` (pytest)
+- [x] ``CEREBRO_STRICT=1`` synthetic self-dup raises (``tests/test_group_invariants.py``)
+- [x] ``CEREBRO_STRICT`` unset: synthetic self-dup logs + drops (same)
+- [x] ``dedupe_roots()`` collapses parent+child roots (pytest)
+- [x] DB invariant SQL **N/A** as written — no ``canonical_path`` column on
+      ``inventory_db.files`` (Waiver 3 / bug1 doc); PK ``(scan_id, path)``
+      prevents duplicate rows per scan
+- [x] Phase 3–7 smoke: ``post_v1_audit_verify.py`` runs engine/grid smokes +
+      DB unit tests; full UI checklist remains human spot-check
+
+**Manual / operator-owned (still open before tag):**
+
+- [ ] No Phase 1→2 count inversion (5-root production scan log)
 - [ ] Emitted count matches parents-only baseline (±1% tolerance)
-- [ ] `[ROOT_DEDUP]` log present in verification run
-- [ ] `[DIAG:GUARD]` regressions=0 on all exercisable paths
-- [ ] `_assert_no_self_duplicates` did not fire, OR if it did,
-      benign case is documented
-- [ ] DB invariant SQL returns zero rows:
-      ```sql
-      SELECT canonical_path, COUNT(*) FROM files 
-      GROUP BY canonical_path HAVING COUNT(*) > 1;
-      ```
-- [ ] `CEREBRO_STRICT=1` causes synthetic self-dup to raise
-      (test run)
-- [ ] `CEREBRO_STRICT` unset: synthetic self-dup logs and continues
-      (test run)
-- [ ] All Phase 3–7 verify checklists confirmed passing
+- [ ] `[ROOT_DEDUP]` log present **in that** verification run
+- [ ] DEBUG ``[DIAG:GUARD]`` regressions=0 on exercisable paths in that run
+- [ ] `_assert_no_self_duplicates` did not fire, OR benign case documented
 
 ### 8.6 — Tag
 
@@ -928,6 +940,7 @@ against `git log`.)
 | b910578  | 2026-04-22 | 1-closure | Phase 1 verify recorded in plan        |
 | 3f1cfa0  | 2026-04-22 | 2-closure | Phase 2 Step 3 N/A + 2e/doc recorded   |
 | 1415d64  | 2026-04-22 | 8.1     | Remove TurboScanner DIAG:* INFO noise  |
+| b80edfe  | 2026-04-22 | 8.3/8.4 | scan_paths move + defensive comments   |
 | (plan)   | 2026-04-22 | 2d    | Step 3 N/A — Paths B/D removed from tree   |
 | (code)   | —          | 2e    | CEREBRO_STRICT in group_invariants.py      |
 | (docs)   | —          | 2-doc | bug1-canonical-path-dedup.md present       |
@@ -952,6 +965,10 @@ Every edit to this file requires a line here.
   and Step 5 (bug1 investigation doc) already satisfied in-tree.
 - **2026-04-22** — Phase 8.3: `cerebro/core/SCAN_PATHS.md` relocated to
   `docs/architecture/scan_paths.md`; all in-repo plan references updated.
+- **2026-04-22** — Phase 8.5 automated subset: ``scripts/post_v1_audit_verify.py``
+  + ``tests/test_post_v1_audit_verification.py`` + ``tests/test_group_invariants.py``
+  + tracked ``docs/releases/v1.1.0/final_verification.log``. Manual 5-root bars
+  still operator-owned before tag ``v1.1.0-post-audit``.
 
 ---
 

@@ -8,22 +8,24 @@ can all import the same guard without duplicating logic.
 Strict mode:
     CEREBRO_STRICT=1   — guard raises AssertionError (tests, CI, dev runs)
     unset / empty      — guard logs warning and drops offending entry (default
-                         production posture; no -O flag is used in any Cerebro
-                         launch path, so the built-in debug flag is always True —
-                         env-var gating is the correct mechanism here)
+                         production posture). ``CEREBRO_STRICT`` is evaluated on
+                         each call so tests and shells can toggle without restart.
 """
 
 from __future__ import annotations
 
 import os
-import unicodedata
 from typing import List, Tuple
 
 from cerebro.services.logger import get_logger
 
 logger = get_logger(__name__)
 
-_STRICT: bool = os.environ.get("CEREBRO_STRICT", "").lower() in ("1", "true", "yes")
+
+def _strict_enabled() -> bool:
+    """Read on each call so tests (and shells) can toggle ``CEREBRO_STRICT``
+    without restarting the interpreter."""
+    return os.environ.get("CEREBRO_STRICT", "").lower() in ("1", "true", "yes")
 
 # Defense-in-depth for Bug 1 (Phase 2c ``434fa7f``, 2026-04): catches self-duplicate
 # groups that slip past ``dedupe_roots()`` (hardlinks, junctions, symlinks).
@@ -73,7 +75,7 @@ def _assert_no_self_duplicates(group: list, group_key: str = "?") -> Tuple[list,
                 f"contains {path} resolving to {canonical}, already present "
                 f"via {canonicals[canonical]}"
             )
-            if _STRICT:
+            if _strict_enabled():
                 raise AssertionError(msg)
             logger.warning(msg)
             regressions += 1
