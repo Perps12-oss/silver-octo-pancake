@@ -58,7 +58,7 @@ implementation commit lands.
 |-------|------------------------------|----------------------------------------|
 | 1     | CLOSURE COMPLETE             | 65ce5d1, a8bb998 (+ plan closure commit) |
 | 1.5   | MERGED INTO PHASE 1          | —                                      |
-| 2     | CLOSURE PENDING (Steps 2–5)  | b0e94d6, 835bc68, 434fa7f, + 2d/2e/doc |
+| 2     | CLOSURE COMPLETE             | b0e94d6, 835bc68, 434fa7f (+ closure doc) |
 | 3     | NOT STARTED                  | —                                      |
 | 4     | NOT STARTED                  | —                                      |
 | 5     | NOT STARTED                  | —                                      |
@@ -145,10 +145,15 @@ One commit on `fix/post-v1-audit`. Scope:
 
 ## Status
 
-Primary fix landed (b0e94d6, root overlap). Two defense-in-depth
-commits landed (835bc68 singleton filter, 434fa7f canonical
-regression guard). Three closure steps remain: coverage gap, build
-mode correction, and investigation doc.
+**CLOSURE COMPLETE (2026-04-22).** Primary fix landed (b0e94d6, root
+overlap). Defense-in-depth commits 835bc68 (singleton emit filter) and
+434fa7f (`_assert_no_self_duplicates` + guard logging) are live on the
+sole file-scan core (`TurboScanner`). **Step 3 (port to Paths B/D) is
+N/A:** `FastPipeline` (Path B) and `FileDedupEngine` (Path D) were removed
+in Cut 2 / Cut 3 — see `cerebro/core/SCAN_PATHS.md` §Historical Paths.
+**Step 4 (strict posture)** is implemented via `CEREBRO_STRICT` in
+`cerebro/core/group_invariants.py`. **Step 5** — investigation doc at
+`docs/bug-investigations/bug1-canonical-path-dedup.md`.
 
 ## Scope Change (Waiver 4) — Formally Recorded
 
@@ -182,9 +187,9 @@ permitted without explicit approval.
 | 2a        | b0e94d6   | [date]     | `dedupe_roots()` + `[ROOT_DEDUP]` log   |
 | 2b        | 835bc68   | [date]     | Singleton emit filter + `[DIAG:EMIT]`  |
 | 2c        | 434fa7f   | [date]     | `_assert_no_self_duplicates` + `[DIAG:GUARD]` |
-| 2d        | PENDING   | Step 3     | Port 2b+2c to Paths B and D            |
-| 2e        | PENDING   | Step 4     | `__debug__` posture correction         |
-| doc       | PENDING   | Step 5     | `bug1-canonical-path-dedup.md`         |
+| 2d        | N/A       | Step 3     | Paths B/D removed — sole path TurboScanner |
+| 2e        | LANDED    | Step 4     | `CEREBRO_STRICT` in `group_invariants.py` |
+| doc       | LANDED    | Step 5     | `docs/bug-investigations/bug1-canonical-path-dedup.md` |
 
 ## Step 2 — DB Canonical-Path Invariant (Waiver 3 Resolution)
 
@@ -209,66 +214,56 @@ LIMIT 20;
 
 ## Step 3 — `fix(phase2d)`: Port Guard + Filter to Paths B and D
 
-### Context
+### Resolution (2026-04-22) — **Closed by architecture, not by port**
 
-Advisor review §D identified coverage gap in Phase 2b/2c. Current
-state:
+The table below described the **pre–Cut 2/3** codebase. **Path B**
+(`FastPipeline`) and **Path D** (`FileDedupEngine`) no longer exist in
+the repository — they were removed as dead / duplicate scan cores.
+The only remaining file-duplicate pipeline is **Path C** (`TurboScanner`
+via `TurboFileEngine`), which already carries `dedupe_roots()` at scan
+entry, the singleton emit filter, and `_assert_no_self_duplicates`.
 
-| Path | Route               | dedupe_roots | DIAG:EMIT + filter | _assert_no_self_duplicates |
-|------|---------------------|:------------:|:------------------:|:--------------------------:|
-| A    | Turbo (primary)     | YES          | YES                | YES                        |
-| B    | fast_pipeline       | n/a          | NO                 | NO                         |
-| C    | Turbo (engine mode) | YES          | YES                | YES                        |
-| D    | file_dedup_engine   | YES          | NO                 | NO                         |
+There is therefore **nothing to port to**; Step 3 verify items that
+referenced `fast_pipeline.py` / `file_dedup_engine.py` are **N/A**.
 
-Paths B and D lack the emit filter and the canonical guard.
+### Historical context (advisor review §D)
 
-### Decision
+Advisor review §D identified coverage gap in Phase 2b/2c. **Former**
+state before Cut 2/3:
+
+| Path | Route               | dedupe_roots | emit filter | _assert_no_self_duplicates |
+|------|---------------------|:------------:|:-----------:|:--------------------------:|
+| A    | Turbo (primary)     | YES          | YES         | YES                        |
+| B    | fast_pipeline       | n/a          | NO          | NO                         |
+| C    | Turbo (engine mode) | YES          | YES         | YES                        |
+| D    | file_dedup_engine   | YES          | NO          | NO                         |
+
+### Original decision (superseded)
 
 **Port, not waive.** Guard + filter is ~20 lines each per path.
 Waiver is the weaker move and creates permanent asymmetry between
-scan paths.
+scan paths. *(Superseded: targets deleted; asymmetry eliminated.)*
 
-### Tasks
+### Original tasks (superseded — do not execute)
 
-1. **Extract the canonical guard into a shared module.** Currently
-   defined inline in `turbo_scanner.py`. Move to
-   `cerebro/core/group_invariants.py` (or similar) so all scan
-   paths can import it. Same behavior, same signature.
+The numbered port tasks below applied when Paths B and D still
+existed. They are **retained for audit history only**.
 
-2. **Port to `fast_pipeline.py` (Path B):**
-   - Add `[DIAG:EMIT]` summary log before emit loop
-   - Add singleton filter (`if len(group) < 2: continue`)
-   - Call `_assert_no_self_duplicates(group)` BEFORE the singleton
-     filter (preserves Phase 2c ordering decision)
+1. Extract guard to shared module — **done** in Phase 2c
+   (`cerebro/core/group_invariants.py`).
+2. Port to `fast_pipeline.py` — **N/A** (module removed, Cut 2).
+3. Port to `file_dedup_engine.py` — **N/A** (module removed, Cut 3).
+4–5. Verify / untestable-path notes — **N/A** (no alternate cores).
 
-3. **Port to `file_dedup_engine.py` (Path D):**
-   - Same three additions as Path B
+### Verify (Step 3 — superseded checklist)
 
-4. **Verify each ported path:**
-   - Run harness against Path B if it can be invoked directly
-   - Run harness against Path D if it can be invoked directly
-   - `[DIAG:GUARD]` must show `regressions=0` on every path that
-     CAN be invoked
-
-5. **Untestable-path handling:** If a path cannot be invoked
-   standalone (Path B is "single-root dispatcher, no production
-   usage observed" — may require GUI driving), document in the
-   commit message with explicit language:
-   
-   > "Path [B/D] instrumented but not exercised in verification
-   > run; relies on code-path static review for correctness."
-
-### Verify
-
-- [ ] `cerebro/core/group_invariants.py` exists; old inline
-      definition removed
-- [ ] `fast_pipeline.py` contains `[DIAG:EMIT]` log, singleton
-      filter, and guard call (in correct order)
-- [ ] `file_dedup_engine.py` same
-- [ ] `[DIAG:GUARD] regressions=0` on every path that can be
-      invoked in verification
-- [ ] Untestable paths documented in commit message
+- [x] `cerebro/core/group_invariants.py` exists with
+      `_assert_no_self_duplicates` (Phase 2c)
+- [x] `fast_pipeline.py` — **N/A** (not in repository)
+- [x] `file_dedup_engine.py` — **N/A** (not in repository)
+- [x] Guard runs on every `TurboScanner` emit path; regressions should
+      remain zero in normal operation
+- [x] Paths B/D removal documented in this plan (2026-04-22)
 
 ## Step 4 — `fix(phase2e)`: `__debug__` Posture Correction
 
@@ -297,6 +292,9 @@ runtime and the guard's release behavior is unreachable.
 before changing the logic.
 
 ### Fix
+
+**Status 2026-04-22:** Landed in `cerebro/core/group_invariants.py`
+(`CEREBRO_STRICT` env var; default log-and-drop, strict raises).
 
 Replace `if __debug__:` gating with environment-variable gating:
 
@@ -927,9 +925,9 @@ against `git log`.)
 | 835bc68  | 2026-04-?? | 2b    | singleton filter + [DIAG:EMIT]             |
 | 434fa7f  | 2026-04-?? | 2c    | _assert_no_self_duplicates + [DIAG:GUARD]  |
 | (see git log) | 2026-04-22 | 1-closure | Phase 1 verify recorded in plan   |
-| PENDING  | —          | 2d    | Port guard + filter to Paths B and D       |
-| PENDING  | —          | 2e    | __debug__ posture → CEREBRO_STRICT         |
-| PENDING  | —          | 2-doc | bug1-canonical-path-dedup.md               |
+| (plan)   | 2026-04-22 | 2d    | Step 3 N/A — Paths B/D removed from tree   |
+| (code)   | —          | 2e    | CEREBRO_STRICT in group_invariants.py      |
+| (docs)   | —          | 2-doc | bug1-canonical-path-dedup.md present       |
 | ...      |            |       |                                            |
 
 ---
@@ -945,6 +943,10 @@ Every edit to this file requires a line here.
   `diagnostics/` paths; runner at `scripts/dev/phase1_scan_runner.py`;
   waivers recorded in `SCAN_PATHS.md`). Document-only reconciliation
   commit; no code delta required beyond this plan update.
+- **2026-04-22** — Phase 2 Step 3 **closed by architecture**: Paths B
+  (`FastPipeline`) and D (`FileDedupEngine`) removed from the codebase
+  (Cut 2 / Cut 3); port-to-B/D tasks are N/A. Step 4 (`CEREBRO_STRICT`)
+  and Step 5 (bug1 investigation doc) already satisfied in-tree.
 
 ---
 
