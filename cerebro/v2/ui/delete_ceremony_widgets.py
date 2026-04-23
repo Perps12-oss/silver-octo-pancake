@@ -1,6 +1,6 @@
 """Delete ceremony UI — modals, progress, summary, celebration, undo toast.
 
-Moved out of the retired ``main_window`` module so the live app path
+Moved out of the retired monolithic Ashisoft shell module so the live app path
 (``main.py`` → ``app_shell.run_app``) never imports the legacy Ashisoft
 shell.  Imported by :mod:`cerebro.v2.ui.delete_flow` only.
 """

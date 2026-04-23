@@ -22,7 +22,7 @@ Public API:
     ) -> DeleteCeremonyResult
 
 The function blocks on a nested event loop while the progress dialog runs
-(same pattern the legacy MainWindow used). It's safe to call from a Tk
+(same nested event-loop pattern as the original single-window delete flow). It's safe to call from a Tk
 event handler. It must NOT be called from a worker thread.
 
 What this does NOT do:
@@ -87,7 +87,7 @@ def run_delete_ceremony(
 ) -> DeleteCeremonyResult:
     """Run the 4-step ceremony and return what happened.
 
-    Flow (unchanged from the legacy MainWindow._on_delete_selected):
+    Flow (unchanged from the original Results-page delete implementation):
         Step 1 — "Are you sure?"                  Cancel / Confirm
         Step 2 — breakdown + Recycle Bin notice   Cancel / Allow
         Step 3 — progress dialog + worker thread  (non-cancellable)
