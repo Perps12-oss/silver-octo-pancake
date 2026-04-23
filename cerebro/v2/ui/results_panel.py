@@ -1149,7 +1149,7 @@ class ResultsPanel(CTkFrame):
         self._show_empty_state()
         self._update_status()
 
-    # Compatibility helpers used by main window wiring.
+    # Compatibility helpers used by scan host / AppShell wiring.
     def show_welcome_screen(self) -> None:
         self.clear()
 
