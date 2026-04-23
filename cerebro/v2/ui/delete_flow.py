@@ -33,9 +33,8 @@ What this does NOT do:
     reaching here
 
 See also:
-  - cerebro.v2.ui.main_window._DeleteDialog / _DeleteProgressDialog /
-    _DeleteSummaryDialog / _DeleteCelebration / _UndoToast — the dialog
-    classes this orchestrator reuses via lazy import.
+  - cerebro.v2.ui.delete_ceremony_widgets — modal classes and helpers
+    (lazy-imported when ``run_delete_ceremony`` runs).
 """
 from __future__ import annotations
 
@@ -104,14 +103,14 @@ def run_delete_ceremony(
         return result
 
     try:
-        from cerebro.v2.ui.main_window import (
+        from cerebro.v2.ui.delete_ceremony_widgets import (
             _DeleteDialog, _DeleteProgressDialog, _DeleteSummaryDialog,
             _DeleteCelebration, _UndoToast,
             _delete_media_label, _delete_breakdown,
         )
         from cerebro.v2.core.deletion_history_db import log_deletion_event
     except ImportError:
-        _log.exception("Delete ceremony unavailable — legacy dialog import failed")
+        _log.exception("Delete ceremony unavailable — delete_ceremony_widgets import failed")
         return result
 
     try:
