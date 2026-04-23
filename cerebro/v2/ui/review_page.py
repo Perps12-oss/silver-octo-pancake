@@ -464,7 +464,7 @@ class ReviewPage(tk.Frame):
 
         self._ensure_filter_wrap()
         self._refresh_type_counts()
-        self._apply_type_filter(self._filter)
+        self._apply_type_filter(self._filter, materialize_thumb_grid=False)
         self._update_summary()
         # Compare mode for the picked group — pick A = first file, B = second.
         gid = group_id if any(g.group_id == group_id for g in self._groups) \
@@ -531,7 +531,7 @@ class ReviewPage(tk.Frame):
             self._filter = "all"
             self._filter_bar._set_active("all")
 
-    def _apply_type_filter(self, key: str) -> None:
+    def _apply_type_filter(self, key: str, *, materialize_thumb_grid: bool = True) -> None:
         self._filter = key
         if key == "other":
             rows = [
@@ -550,10 +550,10 @@ class ReviewPage(tk.Frame):
                     if (r.get("extension", "") or "").lower() in exts
                 ]
         self._rows = rows
-        # Always refresh the virtual grid backing store when groups exist so
-        # ``load_group`` → compare still leaves a correct grid when the user
-        # returns to grid mode (``_mode`` may still be ``compare`` here).
-        if self._groups:
+        # Refresh the virtual grid when entering / staying in grid mode.
+        # Skip when ``load_group`` is about to open compare — avoids a
+        # full decode pass for a hidden grid.
+        if self._groups and materialize_thumb_grid:
             self._thumb_grid.load(self._rows)
 
     # ------------------------------------------------------------------

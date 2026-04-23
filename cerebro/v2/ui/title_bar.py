@@ -40,7 +40,7 @@ class TitleBar(tk.Frame):
         self._named_links: Dict[str, tk.Label] = {}
         self._t = ThemeApplicator.get().build_tokens()
         self._build()
-        ThemeApplicator.get().register(self._apply_theme)
+        ThemeApplicator.get().register(self._apply_theme, priority=15)
 
     # ------------------------------------------------------------------
 

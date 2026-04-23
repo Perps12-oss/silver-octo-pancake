@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import tkinter as tk
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
 _log = logging.getLogger(__name__)
 
@@ -38,7 +38,13 @@ def theme_token(t: dict, key: str, default: str) -> str:
 
 
 class ThemeApplicator:
-    """Singleton theme applicator for the new shell."""
+    """Singleton theme applicator for the new shell.
+
+    Hooks run in ascending *priority* (lower first). Register shell chrome
+    with priority < 50 (e.g. 10); pages typically use the default 50.
+    Each dispatch includes monotonic ``tokens["_rev"]`` for idempotence /
+    diagnostics in heavy widgets.
+    """
 
     _instance: "ThemeApplicator | None" = None
 
@@ -49,26 +55,26 @@ class ThemeApplicator:
         return cls._instance
 
     def __init__(self) -> None:
-        self._hooks: List[Callable[[dict], None]] = []
+        self._hooks: List[Tuple[int, Callable[[dict], None]]] = []
         self._current: str = "Cerebro Dark"
         self._root: Optional[tk.Misc] = None
+        self._dispatch_seq: int = 0
 
-    def register(self, hook: Callable[[dict], None]) -> None:
+    def register(self, hook: Callable[[dict], None], *, priority: int = 50) -> None:
         """Register a callback that receives the full theme token dict.
 
         The hook is NOT invoked immediately; callers are expected to either
         consume ``build_tokens()`` during their own construction, or wait for
         the next ``apply()`` / ``refresh()`` dispatch.
+
+        *priority* — lower runs first (shell chrome before page trees).
         """
-        if hook not in self._hooks:
-            self._hooks.append(hook)
+        if not any(h is hook for _, h in self._hooks):
+            self._hooks.append((priority, hook))
 
     def unregister(self, hook: Callable[[dict], None]) -> None:
         """Remove a previously registered hook (no-op if absent)."""
-        try:
-            self._hooks.remove(hook)
-        except ValueError:
-            pass
+        self._hooks = [(p, h) for p, h in self._hooks if h is not hook]
 
     @property
     def current_theme(self) -> str:
@@ -103,6 +109,7 @@ class ThemeApplicator:
         if root is not None:
             self._root = root
 
+        self._dispatch_seq += 1
         tokens = self.build_tokens()
         target = self._root
         if target is not None:
@@ -116,6 +123,7 @@ class ThemeApplicator:
 
     def refresh(self) -> None:
         """Re-dispatch the currently active theme to all listeners (no engine change)."""
+        self._dispatch_seq += 1
         tokens = self.build_tokens()
         target = self._root
         if target is not None:
@@ -128,7 +136,7 @@ class ThemeApplicator:
 
     def build_tokens(self) -> dict:
         """Build a flat token dict from the currently active theme."""
-        return {
+        tokens = {
             # Base
             "bg":              _tc("base.background"),
             "bg2":             _tc("base.backgroundSecondary"),
@@ -161,9 +169,11 @@ class ThemeApplicator:
             # Theme name for reference
             "_name":           self._current,
         }
+        tokens["_rev"] = int(self._dispatch_seq)
+        return tokens
 
     def _dispatch(self, tokens: dict) -> None:
-        for hook in self._hooks:
+        for _prio, hook in sorted(self._hooks, key=lambda ph: ph[0]):
             try:
                 hook(tokens)
             except Exception as e:

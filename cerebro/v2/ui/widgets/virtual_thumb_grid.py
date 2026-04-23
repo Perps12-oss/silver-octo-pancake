@@ -176,7 +176,10 @@ class VirtualThumbGrid(tk.Canvas):
         self._decode_executor = ThreadPoolExecutor(
             max_workers=4, thread_name_prefix="vthumb-decode")
         self._decode_semaphore = threading.Semaphore(4)
-        self._decode_futures: Dict[int, Future] = {}
+        # Monotonic epoch bumped on ``load()`` so late decode callbacks
+        # cannot paint or cache thumbs for a replaced dataset.
+        self._decode_epoch: int = 0
+        self._decode_futures: Dict[int, Tuple[int, Future]] = {}
         self._thumb_cache: "OrderedDict[Tuple[str, float, int], Any]" = \
             OrderedDict()
         # Images we've converted to ImageTk.PhotoImage; held by path so
@@ -276,15 +279,14 @@ class VirtualThumbGrid(tk.Canvas):
     # Public API
 
     def load(self, rows: List[Dict]) -> None:
+        self._decode_epoch += 1
         self._rows = rows
         self._recount_groups()
         self._selected_idx = 0 if rows else None
         self._checked.clear()
         self._scroll_y = 0
-        # Cancel pending decodes from the previous dataset — they'd
-        # just pollute the cache with stale entries. Futures in flight
-        # are let to finish; their results land in the cache but are
-        # harmless.
+        # Drop in-flight decode bookkeeping; late worker results are
+        # ignored via ``_decode_epoch`` / ``_poll`` entry identity checks.
         self._decode_futures.clear()
         self._update_total_h()
         self._render()
@@ -548,22 +550,33 @@ class VirtualThumbGrid(tk.Canvas):
         key = self._cache_key(path)
         if key is None or key in self._thumb_cache:
             return
+        submit_epoch = self._decode_epoch
         fut = self._decode_executor.submit(self._decode, path, key)
-        self._decode_futures[idx] = fut
-        self.after(40, lambda i=idx, f=fut, k=key: self._poll(i, f, k))
+        self._decode_futures[idx] = (submit_epoch, fut)
+        self.after(40, lambda: self._poll(idx, fut, key, submit_epoch))
 
     def _poll(self, idx: int, fut: Future,
-              key: Tuple[str, float, int]) -> None:
+              key: Tuple[str, float, int], submit_epoch: int) -> None:
+        if self._decode_futures.get(idx) != (submit_epoch, fut):
+            return
         if not fut.done():
-            self.after(60, lambda: self._poll(idx, fut, key))
+            self.after(60, lambda: self._poll(idx, fut, key, submit_epoch))
             return
         self._decode_futures.pop(idx, None)
+        if submit_epoch != self._decode_epoch:
+            return
         try:
             img = fut.result()
         except Exception as exc:  # pylint: disable=broad-except
             _log.debug("thumb decode crashed for idx=%d: %s", idx, exc)
             return
         if img is None:
+            return
+        if not (0 <= idx < len(self._rows)):
+            return
+        row = self._rows[idx]
+        ck = self._cache_key(Path(str(row.get("path", ""))))
+        if ck != key:
             return
         self._thumb_cache[key] = img
         self._thumb_cache.move_to_end(key)

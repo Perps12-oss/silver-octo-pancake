@@ -161,7 +161,7 @@ class TabBar(tk.Frame):
         # Bottom border drawn as a child frame
         self._bottom_border = tk.Frame(self, bg=_BORDER, height=1)
         self._bottom_border.pack(side="bottom", fill="x")
-        ThemeApplicator.get().register(self._apply_theme)
+        ThemeApplicator.get().register(self._apply_theme, priority=20)
 
     def _build(self) -> None:
         self._inner_frame = tk.Frame(self, bg=self._t.get("tab_bg", _SURFACE))

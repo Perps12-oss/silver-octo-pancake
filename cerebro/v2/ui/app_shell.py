@@ -36,6 +36,16 @@ from cerebro.v2.ui.review_page      import ReviewPage
 from cerebro.v2.ui.history_page     import HistoryPage
 from cerebro.v2.ui.diagnostics_page import DiagnosticsPage
 from cerebro.v2.ui.theme_applicator import ThemeApplicator
+from cerebro.v2.ui.scan_completion import ScanCompletionCoordinator
+from cerebro.v2.ui.scan_ui_store import ScanUiStore
+from cerebro.v2.ui.scan_session_state import ScanSessionSnapshot
+from cerebro.v2.ui.scan_ui_actions import (
+    ActionNavigateResults,
+    ActionOpenGroup,
+    ActionOpenSession,
+    ActionScanCompleted,
+    ActionScanHistoryCleared,
+)
 from cerebro.engines.orchestrator   import ScanOrchestrator
 
 _PAGE_BG_FALLBACK = "#F0F0F0"
@@ -114,7 +124,7 @@ class AppShell(CTk):
 
         # Re-paint shell chrome (root window + page container) whenever the
         # theme changes so no surface is left at the hard-coded fallback color.
-        ThemeApplicator.get().register(self._apply_shell_theme)
+        ThemeApplicator.get().register(self._apply_shell_theme, priority=10)
 
         self._pages: Dict[str, CTkFrame] = {}
 
@@ -123,12 +133,6 @@ class AppShell(CTk):
             on_session_click=self._on_history_session_click,
         )
         self._pages["history"] = self._history_page
-
-        self._diagnostics_page = DiagnosticsPage(
-            self._page_container,
-            on_scan_history_cleared=self._on_scan_history_cleared,
-        )
-        self._pages["diagnostics"] = self._diagnostics_page
 
         self._review_page = ReviewPage(
             self._page_container,
@@ -146,7 +150,7 @@ class AppShell(CTk):
 
         self._results_page = ResultsPage(
             self._page_container,
-            on_open_group=self._on_open_group,
+            on_open_group=self._on_open_group_dispatch,
             on_navigate_home=lambda: self.switch_tab("welcome"),
             on_rescan=lambda: self.switch_tab("scan"),
         )
@@ -155,13 +159,35 @@ class AppShell(CTk):
         self._pages["welcome"] = WelcomePage(
             self._page_container,
             on_start_scan=lambda: self.switch_tab("scan"),
-            on_open_session=self._on_open_session,
+            on_open_session=self._on_open_session_dispatch,
         )
+
+        self._scan_coordinator = ScanCompletionCoordinator(
+            results_page=self._results_page,
+            review_page=self._review_page,
+            welcome_refresh=lambda: self._pages["welcome"].refresh(),
+            set_results_badge=self.set_results_badge,
+            enable_review_tab=self.enable_review_tab,
+            switch_tab=self.switch_tab,
+        )
+        self._scan_store = ScanUiStore(
+            coordinator=self._scan_coordinator,
+            review_page=self._review_page,
+            welcome_refresh=lambda: self._pages["welcome"].refresh(),
+            history_refresh=self._history_page.refresh,
+            switch_tab=self.switch_tab,
+        )
+
+        self._diagnostics_page = DiagnosticsPage(
+            self._page_container,
+            on_scan_history_cleared=self._on_scan_history_cleared_dispatch,
+        )
+        self._pages["diagnostics"] = self._diagnostics_page
 
         self._pages["scan"] = ScanPage(
             self._page_container,
             orchestrator=self._orchestrator,
-            on_scan_complete=self._on_scan_complete,
+            on_scan_complete=self._on_scan_complete_dispatch,
         )
 
         self._current_page: str = "welcome"
@@ -273,54 +299,23 @@ class AppShell(CTk):
         """Apply a theme globally through the single ThemeApplicator entry point."""
         ThemeApplicator.get().apply(theme_name, self)
 
-    def _on_open_session(self, session) -> None:
-        """Load a past session into the Results page and switch to it (Phase 4+)."""
-        self.switch_tab("results")
+    def _on_scan_complete_dispatch(self, results: list, mode: str = "files") -> None:
+        """ScanPage callback — reducer + coordinator handle sequencing."""
+        self._scan_store.dispatch(ActionScanCompleted(results, mode))
 
-    def _on_scan_complete(self, results: list, mode: str = "files") -> None:
-        """Called by ScanPage when a scan finishes."""
-        self._scan_results = results
-        self._scan_mode    = mode or "files"
-        self._results_page.load_results(results, mode=mode)
-        # Seed Review with the same data in grid-mode so Smart Select
-        # already has the full group set loaded if the user tabs over
-        # directly. The compare mode only ever activates when the user
-        # explicitly clicks a tile (or arrives via Results double-click).
-        try:
-            self._review_page.load_results(results, mode=mode)
-        except Exception:   # pylint: disable=broad-except
-            _log.exception("ReviewPage.load_results failed")
-        dup_count = sum(max(0, len(g.files) - 1) for g in results)
-        self.set_results_badge(dup_count)
-        self.enable_review_tab()
-        try:
-            self._pages["welcome"].refresh()
-        except (AttributeError, tk.TclError):
-            pass
-        self.switch_tab("results")
+    def _on_open_group_dispatch(self, group_id: int, groups: list) -> None:
+        self._scan_store.dispatch(ActionOpenGroup(group_id, groups))
 
-    def _on_open_group(self, group_id: int, groups: list) -> None:
-        """Called when user double-clicks a group in Results — opens Review tab
-        in compare mode pre-focused on that group. ``scan_mode`` is
-        threaded through so Smart Select's delete ceremony dialogs use
-        the right media noun."""
-        mode = getattr(self, "_scan_mode", "files")
-        self._review_page.load_group(groups, group_id, mode=mode)
-        self.switch_tab("review")
+    def _on_open_session_dispatch(self, session) -> None:
+        """Welcome callback — open session (navigation only for now)."""
+        self._scan_store.dispatch(ActionOpenSession(session))
 
-    def _on_scan_history_cleared(self) -> None:
-        """Scan history DB was cleared from Diagnostics — refresh in-memory UIs."""
-        try:
-            self._pages["welcome"].refresh()
-        except (AttributeError, tk.TclError):
-            pass
-        try:
-            self._history_page.refresh()
-        except (AttributeError, tk.TclError):
-            pass
+    def _on_scan_history_cleared_dispatch(self) -> None:
+        self._scan_store.dispatch(ActionScanHistoryCleared())
 
     def _on_history_session_click(self, entry) -> None:
-        self.switch_tab("results")
+        _ = entry
+        self._scan_store.dispatch(ActionNavigateResults())
 
     # ------------------------------------------------------------------
     # Public API for later phases
@@ -338,6 +333,11 @@ class AppShell(CTk):
         self._pages[key] = frame
         if self._current_page == key:
             frame.place(relwidth=1, relheight=1)
+
+    @property
+    def scan_snapshot(self) -> ScanSessionSnapshot:
+        """Canonical post-scan session (groups, mode, dup count)."""
+        return self._scan_store.scan_snapshot
 
     def set_results_badge(self, count: int) -> None:
         self._tab_bar.set_results_badge(count)
