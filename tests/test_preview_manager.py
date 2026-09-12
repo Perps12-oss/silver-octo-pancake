@@ -20,7 +20,8 @@ def test_preview_file_missing_returns_false(tmp_path, monkeypatch):
     import cerebro.core.preview as preview_mod
 
     monkeypatch.setattr(preview_mod.subprocess, "run", _fake_run)
-    monkeypatch.setattr(preview_mod.os, "startfile", _fake_startfile, raising=True)
+    # os.startfile exists only on Windows; create the attr when missing (Linux CI)
+    monkeypatch.setattr(preview_mod.os, "startfile", _fake_startfile, raising=False)
 
     assert mgr.preview_file(missing) is False
     assert called["run"] == 0
@@ -65,7 +66,8 @@ def test_preview_file_uses_os_startfile_on_windows(tmp_path, monkeypatch):
         seen["path"] = arg
         return None
 
-    monkeypatch.setattr(preview_mod.os, "startfile", _fake_startfile, raising=True)
+    # os.startfile exists only on Windows; create the attr when missing (Linux CI)
+    monkeypatch.setattr(preview_mod.os, "startfile", _fake_startfile, raising=False)
 
     assert mgr.preview_file(p) is True
     assert seen["path"] == str(p)
